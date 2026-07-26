@@ -27,17 +27,17 @@ import {
   Check,
   X,
   Share2,
+  Users,
+  Trophy,
   Sliders,
   Layers,
   Loader2,
   Link as LinkIcon,
   Wand2,
-  Grid,
-  Users,
-  Trophy
+  Grid
 } from "lucide-react";
 
-// טיפוסי הנתונים של סביבת העריכה
+// טיפוסי הנתונים
 export interface SlideOption {
   id: string;
   text: string;
@@ -65,11 +65,13 @@ export interface Slide {
   multiple_answers?: boolean;
 }
 
+// יצירת קליינט יחיד מחוץ לרכיב למניעת Re-renders בלתי פוסקים
+const supabase = createClient();
+
 export default function EditorPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const gameId = resolvedParams.id;
   const router = useRouter();
-  const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -84,7 +86,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   const [settingsTab, setSettingsTab] = useState<"general" | "design" | "flow" | "winners" | "tools" | "participants" | "teams" | "results">("general");
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isPublicBankOpen, setIsPublicBankOpen] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // Media Picker Modal State
   const [mediaPickerTarget, setMediaPickerTarget] = useState<{
@@ -140,106 +141,66 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamColor, setNewTeamColor] = useState("#6366f1");
 
-  // 1. טעינת נתוני המשחק, השקופיות, ההגדרות, הקבוצות והמשתתפים בצורה מאובטחת
+  // 1. טעינת נתוני המשחק
   useEffect(() => {
     let isMounted = true;
 
     const fetchGameData = async () => {
-      try {
-        setLoading(true);
+      setLoading(true);
 
-        // א. שליפת המשחק וההגדרות
-        const { data: game, error: gameErr } = await supabase
-          .from("games")
-          .select("*")
-          .eq("id", gameId)
-          .maybeSingle();
+      const { data: game, error: gameErr } = await supabase
+        .from("games")
+        .select("*")
+        .eq("id", gameId)
+        .single();
 
-        if (gameErr || !game) {
-          router.push("/dashboard");
-          return;
-        }
-
-        if (!isMounted) return;
-
-        setGameTitle(game.title || "חידון ללא שם");
-        setGeneralSettings(game.general_settings || { title: game.title, cover_image: game.cover_image || "", header_text: game.header_text || "" });
-        if (game.design_settings) setDesignSettings(game.design_settings);
-        if (game.flow_settings) setFlowSettings(game.flow_settings);
-        if (game.leaderboard_settings) setLeaderboardSettings(game.leaderboard_settings);
-
-        // ב. שליפת השקופיות
-        const { data: slidesData } = await supabase
-          .from("slides")
-          .select("*")
-          .eq("game_id", gameId)
-          .order("created_at", { ascending: true });
-
-        if (!isMounted) return;
-
-        if (slidesData && slidesData.length > 0) {
-          const loadedSlides: Slide[] = slidesData.map((s) => ({
-            id: s.id,
-            game_id: s.game_id,
-            title: s.title || "שאלה חדשה",
-            slide_type: s.slide_type || "trivia",
-            options: s.options || [],
-            points: s.points ?? 100,
-            time_limit: s.time_limit ?? 20,
-            media_before: s.media_before || "",
-            media_after: s.media_after || "",
-            question_image: s.question_image || "",
-            custom_bg: s.custom_bg || "",
-            media_config: s.media_config || {},
-          }));
-          setSlides(loadedSlides);
-          setActiveSlideId(loadedSlides[0].id);
-        } else {
-          // יצירת שקופית ראשונית בצורה בטוחה במידה והמשחק ריק
-          const defaultSlideId = crypto.randomUUID();
-          const defaultSlide: Slide = {
-            id: defaultSlideId,
-            game_id: gameId,
-            title: "שאלה ראשונה",
-            slide_type: "trivia",
-            options: [
-              { id: "1", text: "תשובה 1", isCorrect: true },
-              { id: "2", text: "תשובה 2", isCorrect: false },
-              { id: "3", text: "תשובה 3", isCorrect: false },
-              { id: "4", text: "תשובה 4", isCorrect: false },
-            ],
-            points: 100,
-            time_limit: 20,
-          };
-
-          await supabase.from("slides").insert({
-            id: defaultSlide.id,
-            game_id: gameId,
-            title: defaultSlide.title,
-            slide_type: defaultSlide.slide_type,
-            options: defaultSlide.options,
-            points: defaultSlide.points,
-            time_limit: defaultSlide.time_limit,
-          });
-
-          if (isMounted) {
-            setSlides([defaultSlide]);
-            setActiveSlideId(defaultSlideId);
-          }
-        }
-
-        // ג. שליפת קבוצות ומשתתפים בבטחה
-        const { data: teamsData } = await supabase.from("teams").select("*").eq("game_id", gameId);
-        if (teamsData && isMounted) setTeams(teamsData);
-
-        const { data: participantsData } = await supabase.from("participants").select("*").eq("game_id", gameId);
-        if (participantsData && isMounted) setParticipants(participantsData);
-
-      } catch (err) {
-        console.error("Error loading game data:", err);
-      } finally {
-        if (isMounted) setLoading(false);
+      if (gameErr || !game) {
+        router.push("/dashboard");
+        return;
       }
+
+      if (!isMounted) return;
+
+      setGameTitle(game.title || "חידון ללא שם");
+      setGeneralSettings(game.general_settings || { title: game.title, cover_image: game.cover_image || "", header_text: game.header_text || "" });
+      if (game.design_settings) setDesignSettings(game.design_settings);
+      if (game.flow_settings) setFlowSettings(game.flow_settings);
+      if (game.leaderboard_settings) setLeaderboardSettings(game.leaderboard_settings);
+
+      const { data: slidesData } = await supabase
+        .from("slides")
+        .select("*")
+        .eq("game_id", gameId)
+        .order("created_at", { ascending: true });
+
+      if (slidesData && slidesData.length > 0) {
+        const loadedSlides: Slide[] = slidesData.map((s) => ({
+          id: s.id,
+          game_id: s.game_id,
+          title: String(s.title || "שאלה חדשה"),
+          slide_type: s.slide_type || "trivia",
+          options: Array.isArray(s.options) ? s.options : [],
+          points: s.points ?? 100,
+          time_limit: s.time_limit ?? 20,
+          media_before: s.media_before || "",
+          media_after: s.media_after || "",
+          question_image: s.question_image || "",
+          custom_bg: s.custom_bg || "",
+          media_config: s.media_config || {},
+        }));
+        setSlides(loadedSlides);
+        setActiveSlideId(loadedSlides[0].id);
+      } else {
+        await createNewSlide("trivia");
+      }
+
+      const { data: teamsData } = await supabase.from("teams").select("*").eq("game_id", gameId);
+      if (teamsData && isMounted) setTeams(teamsData);
+
+      const { data: participantsData } = await supabase.from("participants").select("*").eq("game_id", gameId);
+      if (participantsData && isMounted) setParticipants(participantsData);
+
+      setLoading(false);
     };
 
     fetchGameData();
@@ -247,17 +208,15 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     return () => {
       isMounted = false;
     };
-  }, [gameId, supabase, router]);
+  }, [gameId, router]);
 
-  // השקופית הפעילה כעת בעורך
-  const activeSlide = slides.find((s) => s.id === activeSlideId) || slides[0] || null;
+  const activeSlide = slides.find((s) => s.id === activeSlideId) || slides[0];
 
-  // 2. שמירת כל השינויים ב-Supabase DB
+  // 2. שמירת שינויים מיועלת ב-Bulk
   const saveAllChanges = async (updatedSlides = slides, updatedTitle = gameTitle) => {
     setSaving(true);
 
     try {
-      // עדכון פרטי המשחק וההגדרות
       await supabase
         .from("games")
         .update({
@@ -271,9 +230,8 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         })
         .eq("id", gameId);
 
-      // שמירת כל השקופיות
-      for (const slide of updatedSlides) {
-        await supabase.from("slides").upsert({
+      if (updatedSlides.length > 0) {
+        const slidesToUpsert = updatedSlides.map((slide) => ({
           id: slide.id,
           game_id: gameId,
           title: slide.title,
@@ -286,16 +244,17 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
           question_image: slide.question_image,
           custom_bg: slide.custom_bg,
           media_config: slide.media_config,
-        });
+        }));
+
+        await supabase.from("slides").upsert(slidesToUpsert);
       }
     } catch (err) {
-      console.error("Error saving changes:", err);
+      console.error("Save error:", err);
     } finally {
       setSaving(false);
     }
   };
 
-  // יצירת שקופית חדשה
   const createNewSlide = async (type: Slide["slide_type"] = "trivia") => {
     const newSlideId = crypto.randomUUID();
     const newSlide: Slide = {
@@ -319,14 +278,12 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     await saveAllChanges(nextSlides);
   };
 
-  // עדכון שקופית קיימת ב-State
   const updateActiveSlide = (field: keyof Slide, value: any) => {
     if (!activeSlideId) return;
     const nextSlides = slides.map((s) => (s.id === activeSlideId ? { ...s, [field]: value } : s));
     setSlides(nextSlides);
   };
 
-  // שכפול שקופית
   const duplicateSlide = async (slide: Slide) => {
     const newId = crypto.randomUUID();
     const dupSlide = { ...slide, id: newId, title: `${slide.title} (עותק)` };
@@ -336,7 +293,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     await saveAllChanges(nextSlides);
   };
 
-  // מחיקת שקופית
   const deleteSlide = async (slideId: string) => {
     if (slides.length <= 1) return;
     const nextSlides = slides.filter((s) => s.id !== slideId);
@@ -345,7 +301,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     await supabase.from("slides").delete().eq("id", slideId);
   };
 
-  // ייבוא/ייצוא Excel ו-PDF
+  // 3. ייבוא אקסל תוקן לפורמט modern ArrayBuffer
   const downloadExcelTemplate = () => {
     const templateData = [
       {
@@ -376,8 +332,10 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: "binary" });
+      const buffer = evt.target?.result as ArrayBuffer;
+      if (!buffer) return;
+
+      const wb = XLSX.read(buffer, { type: "array" });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data: any[] = XLSX.utils.sheet_to_json(ws);
@@ -392,7 +350,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         return {
           id: crypto.randomUUID(),
           game_id: gameId,
-          title: row["נוסח השאלה"] || `שאלה מיובאת ${index + 1}`,
+          title: String(row["נוסח השאלה"] || `שאלה מיובאת ${index + 1}`),
           slide_type: (row["סוג שקופית"] as any) || "trivia",
           options: opts.length > 0 ? opts : [{ id: "1", text: "תשובה 1", isCorrect: true }],
           points: Number(row["ניקוד"]) || 100,
@@ -407,14 +365,14 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         await saveAllChanges(nextSlides);
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
+  // 4. ייצוא ל-PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text(`Quiz: ${gameTitle}`, 20, 20);
+    doc.setFontSize(16);
+    doc.text(`Quiz Export - Game ID: ${gameId}`, 20, 20);
 
     let y = 35;
     slides.forEach((slide, index) => {
@@ -422,8 +380,8 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         doc.addPage();
         y = 20;
       }
-      doc.setFontSize(14);
-      doc.text(`${index + 1}. [${slide.slide_type.toUpperCase()}] ${slide.title}`, 20, y);
+      doc.setFontSize(12);
+      doc.text(`${index + 1}. [${slide.slide_type}] ${slide.title}`, 20, y);
       y += 8;
 
       slide.options.forEach((opt, oIdx) => {
@@ -434,7 +392,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
       y += 6;
     });
 
-    doc.save(`${gameTitle}_Questions.pdf`);
+    doc.save(`Quiz_${gameId}.pdf`);
   };
 
   const uploadSlideToPublicBank = async (slide: Slide) => {
@@ -466,7 +424,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         const createdSlides: Slide[] = data.slides.map((s: any) => ({
           id: crypto.randomUUID(),
           game_id: gameId,
-          title: s.title,
+          title: String(s.title || "שאלה מחוללת"),
           slide_type: s.type || aiSlideType,
           options: s.options || [],
           points: s.points || 100,
@@ -496,8 +454,8 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     } else if (action === "generate_wrong") {
       const updatedOpts = [
         ...activeSlide.options,
-        { id: crypto.randomUUID(), text: "תשובה מוטעית מחוללת AI 1", isCorrect: false },
-        { id: crypto.randomUUID(), text: "תשובה מוטעית מחוללת AI 2", isCorrect: false },
+        { id: crypto.randomUUID(), text: "תשובה מוטעית מחוללת 1", isCorrect: false },
+        { id: crypto.randomUUID(), text: "תשובה מוטעית מחוללת 2", isCorrect: false },
       ];
       updateActiveSlide("options", updatedOpts);
     }
@@ -505,7 +463,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   };
 
   const handleSelectMedia = (url: string) => {
-    if (!mediaPickerTarget || !activeSlide) return;
+    if (!mediaPickerTarget) return;
 
     if (mediaPickerTarget.type === "question_image") {
       updateActiveSlide("question_image", url);
@@ -535,17 +493,15 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#090b10] flex flex-col items-center justify-center text-white gap-3" dir="rtl">
+      <div className="min-h-screen bg-[#090b10] flex items-center justify-center text-white" dir="rtl">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-        <p className="text-xs text-white/50">טוען את עורך המשחק...</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#090b10] text-[#EDEDED] font-sans relative flex flex-col h-screen overflow-hidden" dir="rtl">
-      
-      {/* ================= 1. הסרגל העליון (TOP BAR) ================= */}
+      {/* TOP BAR */}
       <header className="h-16 bg-[#0d1017] border-b border-white/10 px-6 flex items-center justify-between z-30 shrink-0">
         <div className="flex items-center gap-4">
           <Link
@@ -576,14 +532,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setIsPreviewOpen(true)}
-            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white/90 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all"
-          >
-            <Eye className="w-4 h-4 text-purple-400" />
-            <span>תצוגה מקדימה</span>
-          </button>
-
-          <button
             onClick={() => setIsSettingsOpen(true)}
             className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white/90 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all"
           >
@@ -601,10 +549,9 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       </header>
 
-      {/* ================= גוף העורך (SPLIT VIEW) ================= */}
+      {/* MAIN VIEW */}
       <div className="flex-1 flex overflow-hidden">
-        
-        {/* ================= 2. חלק א': רשימת השאלות והכלים (SIDEBAR) ================= */}
+        {/* SIDEBAR */}
         <aside className="w-80 bg-[#0d1017]/90 border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
           <div className="p-3 border-b border-white/10 grid grid-cols-3 gap-2 bg-[#12151c]">
             <label className="flex flex-col items-center justify-center p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 cursor-pointer text-center transition-all">
@@ -637,7 +584,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
             </button>
           </div>
 
-          {/* Slide Cards List */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             {slides.map((slide, index) => {
               const isActive = slide.id === activeSlideId;
@@ -674,7 +620,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                         e.stopPropagation();
                         uploadSlideToPublicBank(slide);
                       }}
-                      title="העלאה למאגר הציבורי"
+                      title="העלאה למאגר"
                       className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-indigo-400"
                     >
                       <Share2 className="w-3.5 h-3.5" />
@@ -718,9 +664,8 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
           </div>
         </aside>
 
-        {/* ================= 3. חלק ב': עורך השקופית והשאלות (MAIN EDITOR CANVAS) ================= */}
+        {/* MAIN CANVAS */}
         <main className="flex-1 bg-[#090b10] flex flex-col overflow-y-auto p-6 relative">
-          
           <div className="max-w-4xl mx-auto w-full mb-6 bg-[#12151c] border border-white/10 p-1.5 rounded-2xl grid grid-cols-5 gap-1.5 shadow-xl">
             {[
               { id: "trivia", label: "טריוויה", icon: HelpCircle },
@@ -753,11 +698,9 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
           {activeSlide && (
             <div className="max-w-4xl mx-auto w-full bg-[#12151c] border border-white/10 rounded-3xl p-6 shadow-2xl flex flex-col gap-6">
-              
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold text-white/70">נוסח השאלה / כותרת השקופית</label>
-                  
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAiAssistSlide("rephrase")}
@@ -789,14 +732,14 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
               {activeSlide.slide_type === "text_slide" && (
                 <div>
-                  <label className="block text-xs font-bold text-white/70 mb-2">תוכן השקופית (טקסט חופשי/הסברים)</label>
+                  <label className="block text-xs font-bold text-white/70 mb-2">תוכן השקופית</label>
                   <textarea
                     rows={5}
                     value={activeSlide.media_config?.textBody || ""}
                     onChange={(e) =>
                       updateActiveSlide("media_config", { ...activeSlide.media_config, textBody: e.target.value })
                     }
-                    placeholder="הכנס כאן תוכן מפורט, הסברים או הוראות למשתתפים..."
+                    placeholder="הכנס כאן תוכן מפורט..."
                     className="w-full bg-[#181d29] border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -804,7 +747,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
               {activeSlide.slide_type === "media_slide" && (
                 <div className="space-y-4">
-                  <label className="block text-xs font-bold text-white/70">קובץ / קישור מדיה (וידאו / תמונה / יוטיוב)</label>
+                  <label className="block text-xs font-bold text-white/70">קובץ / קישור מדיה</label>
                   <div className="flex gap-3">
                     <input
                       type="text"
@@ -812,7 +755,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                       onChange={(e) =>
                         updateActiveSlide("media_config", { ...activeSlide.media_config, videoUrl: e.target.value })
                       }
-                      placeholder="הדבק קישור YouTube או בחר מדיה..."
+                      placeholder="הדבק קישור YouTube..."
                       className="flex-1 bg-[#181d29] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none"
                     />
                     <button
@@ -831,7 +774,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     <label className="text-xs font-bold text-white/70">
                       {activeSlide.slide_type === "poll" ? "אפשרויות הצבעה" : "תשובות המשחק"}
                     </label>
-                    
                     {activeSlide.slide_type === "trivia" && (
                       <label className="flex items-center gap-2 cursor-pointer text-xs text-white/80">
                         <input
@@ -984,13 +926,12 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   </button>
                 </div>
               </div>
-
             </div>
           )}
         </main>
       </div>
 
-      {/* ================= MODALS & PANELS ================= */}
+      {/* SETTINGS MODAL */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-4xl h-[85vh] bg-[#12151c] border border-white/15 rounded-3xl flex overflow-hidden shadow-2xl relative">
@@ -1050,12 +991,12 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-white/70 mb-1">כותרת גלובלית (מוצגת בראש המסך לאורך כל המשחק)</label>
+                    <label className="block text-xs font-medium text-white/70 mb-1">כותרת גלובלית</label>
                     <input
                       type="text"
                       value={generalSettings.header_text}
                       onChange={(e) => setGeneralSettings({ ...generalSettings, header_text: e.target.value })}
-                      placeholder="לדוגמה: חידון חנוכה תשפ''ז - סניף מרכז"
+                      placeholder="לדוגמה: חידון חנוכה"
                       className="w-full bg-[#181d29] border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none"
                     />
                   </div>
@@ -1067,7 +1008,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   <h4 className="text-base font-bold text-white mb-4">רקעים ומוזיקה גלובלית</h4>
                   <div className="grid grid-cols-2 gap-4">
                     {[
-                      { key: "main_bg", label: "רקע מסך ראשי (המתנה)" },
+                      { key: "main_bg", label: "רקע מסך ראשי" },
                       { key: "question_bg", label: "רקע מסך שאלה" },
                       { key: "winners_bg", label: "רקע מסך זוכים" },
                       { key: "leaderboard_bg", label: "רקע לוח תוצאות" },
@@ -1091,10 +1032,10 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   <h4 className="text-base font-bold text-white mb-4">אוטומציות וזרימת המשחק</h4>
                   <div className="space-y-3">
                     {[
-                      { key: "allow_fix_answer", label: "תיקון תשובה (הצבעה אחרונה קובעת כל עוד הטיימר רץ)" },
-                      { key: "auto_show_answers", label: "תצוגת תשובות אוטומטית לאחר הפעלת השאלה" },
-                      { key: "auto_start_timer", label: "התחלת טיימר אוטומטית רק לאחר הצגת התשובה האחרונה" },
-                      { key: "auto_show_correct", label: "הצגת התשובה הנכונה אוטומטית לאחר סיום הטיימר" },
+                      { key: "allow_fix_answer", label: "תיקון תשובה" },
+                      { key: "auto_show_answers", label: "תצוגת תשובות אוטומטית" },
+                      { key: "auto_start_timer", label: "התחלת טיימר אוטומטית" },
+                      { key: "auto_show_correct", label: "הצגת תשובה נכונה בסיום" },
                     ].map((item) => (
                       <label key={item.key} className="flex items-center gap-3 bg-[#181d29] p-3 rounded-xl cursor-pointer">
                         <input
@@ -1114,20 +1055,11 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">הגדרות מובילים ולוח תוצאות</h4>
                   <div>
-                    <label className="block text-xs font-medium text-white/70 mb-1">מספר זוכים להצגה בסיום המשחק (X)</label>
+                    <label className="block text-xs font-medium text-white/70 mb-1">מספר זוכים להצגה</label>
                     <input
                       type="number"
                       value={leaderboardSettings.winners_count}
                       onChange={(e) => setLeaderboardSettings({ ...leaderboardSettings, winners_count: Number(e.target.value) })}
-                      className="w-full bg-[#181d29] border border-white/10 rounded-xl p-2.5 text-xs text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-white/70 mb-1">כמות מובילים בלוח התוצאות בין השאלות</label>
-                    <input
-                      type="number"
-                      value={leaderboardSettings.leaderboard_count}
-                      onChange={(e) => setLeaderboardSettings({ ...leaderboardSettings, leaderboard_count: Number(e.target.value) })}
                       className="w-full bg-[#181d29] border border-white/10 rounded-xl p-2.5 text-xs text-white"
                     />
                   </div>
@@ -1136,7 +1068,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
               {settingsTab === "tools" && (
                 <div className="space-y-4">
-                  <h4 className="text-base font-bold text-white mb-4">כלים מהירים ואוטומציות אצווה</h4>
+                  <h4 className="text-base font-bold text-white mb-4">כלים מהירים</h4>
                   <div className="grid grid-cols-2 gap-4">
                     <button
                       onClick={() => {
@@ -1147,7 +1079,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                       className="bg-[#181d29] hover:bg-[#202636] border border-white/10 p-4 rounded-xl text-right text-xs font-bold text-white flex flex-col gap-2"
                     >
                       <Sparkles className="w-5 h-5 text-indigo-400" />
-                      <span>ערבוב אקראי של סדר השאלות</span>
+                      <span>ערבוב אקראי של השאלות</span>
                     </button>
 
                     <button
@@ -1155,7 +1087,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                       className="bg-[#181d29] hover:bg-[#202636] border border-white/10 p-4 rounded-xl text-right text-xs font-bold text-white flex flex-col gap-2"
                     >
                       <Download className="w-5 h-5 text-emerald-400" />
-                      <span>הורדת כל השאלות לקובץ PDF להדפסה</span>
+                      <span>הורדת שאלות ל-PDF</span>
                     </button>
                   </div>
                 </div>
@@ -1163,7 +1095,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
               {settingsTab === "participants" && (
                 <div className="space-y-4">
-                  <h4 className="text-base font-bold text-white mb-4">ניהול משתתפים / הרשמה מראש</h4>
+                  <h4 className="text-base font-bold text-white mb-4">משתתפים</h4>
                   <div className="flex gap-2 bg-[#181d29] p-3 rounded-xl border border-white/10">
                     <input
                       type="text"
@@ -1216,11 +1148,11 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
               {settingsTab === "teams" && (
                 <div className="space-y-4">
-                  <h4 className="text-base font-bold text-white mb-4">יצירת קבוצות משחק</h4>
+                  <h4 className="text-base font-bold text-white mb-4">קבוצות</h4>
                   <div className="flex gap-2 bg-[#181d29] p-3 rounded-xl border border-white/10">
                     <input
                       type="text"
-                      placeholder="שם הקבוצה (למשל: צוות צפון)"
+                      placeholder="שם הקבוצה"
                       value={newTeamName}
                       onChange={(e) => setNewTeamName(e.target.value)}
                       className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white"
@@ -1271,7 +1203,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               {settingsTab === "results" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">תוצאות והיסטוריית הרצות</h4>
-                  <p className="text-xs text-white/50">כאן יוצגו הדוחות והמדרגים של משחקים שהופעלו בעבר על בסיס חידון זה.</p>
+                  <p className="text-xs text-white/50">כאן יוצגו הדוחות והמדרגים של משחקים מועברים.</p>
                 </div>
               )}
 
@@ -1286,12 +1218,12 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   שמור הגדרות והמשך
                 </button>
               </div>
-
             </div>
           </div>
         </div>
       )}
 
+      {/* AI MODAL */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-[#12151c] border border-purple-500/30 rounded-3xl p-6 relative shadow-2xl">
@@ -1304,19 +1236,19 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 <Sparkles className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-white">מחולל שאלות ב-AI</h3>
-                <p className="text-xs text-white/50">צור שאלות אוטומטית בעזרת בינה מלאכותית</p>
+                <h3 className="text-base font-bold text-white">מחולל שאלות AI</h3>
+                <p className="text-xs text-white/50">צור שאלות אוטומטית</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-white/70 mb-1">נושא / הנחיה (Prompt)</label>
+                <label className="block text-xs font-medium text-white/70 mb-1">נושא / הנחיה</label>
                 <input
                   type="text"
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="לדוגמה: 3 שאלות בנושא חלל ומערכת השמש"
+                  placeholder="לדוגמה: 3 שאלות בנושא חלל"
                   className="w-full bg-[#181d29] border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
                 />
               </div>
@@ -1361,6 +1293,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
 
+      {/* PUBLIC BANK MODAL */}
       {isPublicBankOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-2xl bg-[#12151c] border border-white/15 rounded-3xl p-6 relative shadow-2xl max-h-[80vh] flex flex-col">
@@ -1369,12 +1302,12 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
             </button>
 
             <h3 className="text-base font-bold text-white mb-2">מאגר השאלות הציבורי</h3>
-            <p className="text-xs text-white/50 mb-4">בחר שאלות ששותפו על ידי קהילת המשתמשים ולחץ על ייבוא</p>
+            <p className="text-xs text-white/50 mb-4">בחר שאלות ששותפו על ידי הקהילה</p>
 
             <div className="flex-1 overflow-y-auto space-y-3">
               {[
-                { title: "מה המרחק של כדור הארץ מהשמש?", category: "מדע", type: "trivia" },
-                { title: "איזו מדינה היא הגדולה ביותר בשטחה?", category: "גיאוגרפיה", type: "trivia" },
+                { title: "מה המרחק של כדור הארץ מהשמש?", category: "מדע" },
+                { title: "איזו מדינה היא הגדולה ביותר בשטחה?", category: "גיאוגרפיה" },
               ].map((q, idx) => (
                 <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-[#181d29] border border-white/10">
                   <div>
@@ -1399,6 +1332,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
 
+      {/* MEDIA PICKER MODAL */}
       {mediaPickerTarget && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-[#12151c] border border-white/15 rounded-3xl p-6 relative shadow-2xl">
@@ -1503,7 +1437,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   value={aiImagePrompt}
                   onChange={(e) => setAiImagePrompt(e.target.value)}
                   placeholder="תאר את התמונה שברצונך ליצור..."
-                  className="w-full bg-[#181d29] border border-white/10 rounded-xl p-3 text-xs text-white"
+                  className="w-full bg-[#181d29] border border-white/10 rounded-xl p-3 text-xs text-[#EDEDED]"
                 />
                 <button
                   onClick={handleGenerateAiImage}
@@ -1518,7 +1452,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
           </div>
         </div>
       )}
-
     </div>
   );
 }
