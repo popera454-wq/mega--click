@@ -22,9 +22,9 @@ import {
   KeyRound,
   Mail,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
 
-// טיפוס הנתונים התואם למבנה ה-DB האמיתי
 interface Quiz {
   id: string;
   title: string;
@@ -41,6 +41,8 @@ export default function DashboardPage() {
   // Auth & User state
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // DB Quizzes State
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
@@ -59,61 +61,70 @@ export default function DashboardPage() {
   const [profileMsg, setProfileMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
-  // 1. טעינת פרטי משתמש + שליפת חידונים אמיתיים מ-Supabase
+  // 1. טעינת פרטי משתמש + שליפת חידונים
   useEffect(() => {
+    let isMounted = true;
+
     const fetchDashboardData = async () => {
-      const { data: { user: currentUser }, error } = await supabase.auth.getUser();
-      if (error || !currentUser) {
-        router.push("/login");
-        return;
-      }
-      setUser(currentUser);
-      setFullName(currentUser.user_metadata?.full_name || currentUser.email?.split("@")[0] || "");
+      try {
+        const { data: { user: currentUser }, error } = await supabase.auth.getUser();
+        if (error || !currentUser) {
+          router.push("/login");
+          return;
+        }
 
-      // שליפת החידונים והשקופיות מה-DB
-      const { data: gamesData, error: gamesError } = await supabase
-        .from("games")
-        .select(`
-          id,
-          title,
-          cover_image,
-          updated_at,
-          settings,
-          slides(id)
-        `)
-        .order("updated_at", { ascending: false });
+        if (!isMounted) return;
+        setUser(currentUser);
+        setFullName(currentUser.user_metadata?.full_name || currentUser.email?.split("@")[0] || "");
 
-      if (!gamesError && gamesData) {
-        const formattedQuizzes: Quiz[] = gamesData.map((game: any) => ({
-          id: game.id,
-          title: game.title,
-          coverImage: game.cover_image || undefined,
-          questionCount: game.slides ? game.slides.length : 0,
-          updatedAt: new Date(game.updated_at).toISOString().split("T")[0],
-          tags: game.settings?.tags || ["כללי"],
-        }));
-        setQuizzes(formattedQuizzes);
+        const { data: gamesData, error: gamesError } = await supabase
+          .from("games")
+          .select(`
+            id,
+            title,
+            cover_image,
+            updated_at,
+            settings,
+            slides(id)
+          `)
+          .order("updated_at", { ascending: false });
+
+        if (!gamesError && gamesData && isMounted) {
+          const formattedQuizzes: Quiz[] = gamesData.map((game: any) => ({
+            id: game.id,
+            title: game.title || "חידון ללא שם",
+            coverImage: game.cover_image || undefined,
+            questionCount: Array.isArray(game.slides) ? game.slides.length : 0,
+            updatedAt: game.updated_at ? new Date(game.updated_at).toISOString().split("T")[0] : "",
+            tags: game.settings?.tags || ["כללי"],
+          }));
+          setQuizzes(formattedQuizzes);
+        }
+      } catch (err) {
+        console.error("Error loading dashboard:", err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchDashboardData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router, supabase]);
 
-  // התנתקות מלאה
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
   };
 
-  // 2. יצירת חידון חדש אמיתי ב-DB (הפונקציה המעודכנת)
+  // 2. יצירת חידון חדש (מוגן בטיפול שגיאות בטוח)
   const handleCreateQuiz = async () => {
-    if (!user) {
-      alert("משתמש לא מחובר");
-      return;
-    }
-    setLoading(true);
+    if (!user) return;
+    setActionLoading(true);
+    setErrorMessage(null);
 
     try {
       const { data, error } = await supabase
@@ -129,76 +140,81 @@ export default function DashboardPage() {
         .single();
 
       if (error) {
-        console.error("שגיאה ביצירת המשחק ב-Supabase:", error);
-        alert(`שגיאה ביצירת המשחק: ${error.message}\n(בדוק הרשאות RLS ב-Supabase)`);
-        setLoading(false);
+        console.error("Supabase Error:", error);
+        setErrorMessage(`שגיאה ביצירת המשחק ב-DB: ${error.message}`);
+        setActionLoading(false);
         return;
       }
 
       if (data && data.id) {
-        // מעבר לעמוד העורך
         router.push(`/editor/${data.id}`);
       } else {
-        alert("לא התקבל מזהה משחק מ-Supabase");
-        setLoading(false);
+        setErrorMessage("המשחק נוצר אך לא התקבל מזהה (ID).");
+        setActionLoading(false);
       }
     } catch (err: any) {
-      console.error("שגיאה בלתי צפויה:", err);
-      alert(`שגיאה בלתי צפויה: ${err.message || err}`);
-      setLoading(false);
+      console.error("Unexpected Error:", err);
+      setErrorMessage("אירעה שגיאה בלתי צפויה ביצירת החידון.");
+      setActionLoading(false);
     }
   };
 
-  // 3. שכפול חידון אמיתי ב-DB
+  // 3. שכפול חידון
   const handleDuplicate = async (quiz: Quiz) => {
     if (!user) return;
 
-    const { data: originalGame } = await supabase
-      .from("games")
-      .select("settings, cover_image")
-      .eq("id", quiz.id)
-      .single();
+    try {
+      const { data: originalGame } = await supabase
+        .from("games")
+        .select("settings, cover_image")
+        .eq("id", quiz.id)
+        .single();
 
-    const { data: newGame, error } = await supabase
-      .from("games")
-      .insert([
-        {
-          user_id: user.id,
-          title: `${quiz.title} (עותק)`,
-          cover_image: originalGame?.cover_image || null,
-          settings: originalGame?.settings || { tags: quiz.tags },
-        },
-      ])
-      .select()
-      .single();
+      const { data: newGame, error } = await supabase
+        .from("games")
+        .insert([
+          {
+            user_id: user.id,
+            title: `${quiz.title} (עותק)`,
+            cover_image: originalGame?.cover_image || null,
+            settings: originalGame?.settings || { tags: quiz.tags },
+          },
+        ])
+        .select()
+        .single();
 
-    if (!error && newGame) {
-      const duplicated: Quiz = {
-        id: newGame.id,
-        title: newGame.title,
-        coverImage: newGame.cover_image || undefined,
-        questionCount: 0,
-        updatedAt: new Date(newGame.updated_at).toISOString().split("T")[0],
-        tags: quiz.tags,
-      };
-      setQuizzes([duplicated, ...quizzes]);
+      if (!error && newGame) {
+        const duplicated: Quiz = {
+          id: newGame.id,
+          title: newGame.title,
+          coverImage: newGame.cover_image || undefined,
+          questionCount: 0,
+          updatedAt: new Date(newGame.updated_at).toISOString().split("T")[0],
+          tags: quiz.tags,
+        };
+        setQuizzes([duplicated, ...quizzes]);
+      }
+    } catch (err) {
+      console.error("Error duplicating quiz:", err);
     }
   };
 
-  // 4. מחיקת חידון אמיתית ב-DB
+  // 4. מחיקת חידון
   const confirmDelete = async () => {
     if (deleteTargetId) {
-      const { error } = await supabase.from("games").delete().eq("id", deleteTargetId);
-      if (!error) {
-        setQuizzes(quizzes.filter((q) => q.id !== deleteTargetId));
-      } else {
-        console.error("שגיאה במחיקת החידון:", error);
+      try {
+        const { error } = await supabase.from("games").delete().eq("id", deleteTargetId);
+        if (!error) {
+          setQuizzes(quizzes.filter((q) => q.id !== deleteTargetId));
+        }
+      } catch (err) {
+        console.error("Error deleting quiz:", err);
       }
       setDeleteTargetId(null);
     }
   };
 
-  // 5. עדכון פרופיל אמיתי
+  // 5. עדכון פרופיל
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingProfile(true);
@@ -211,7 +227,6 @@ export default function DashboardPage() {
         });
         if (error) throw error;
 
-        // עדכון טבלת profiles במידה וקיימת
         await supabase.from("profiles").upsert({ id: user.id, full_name: fullName, email: user.email });
       }
 
@@ -223,13 +238,12 @@ export default function DashboardPage() {
       setProfileMsg({ type: "success", text: "הפרטים עודכנו בהצלחה!" });
       setNewPassword("");
     } catch (err: any) {
-      setProfileMsg({ type: "error", text: err.message || "אירעה שגיאה בעדכון" });
+      setProfileMsg({ type: "error", text: err?.message || "אירעה שגיאה בעדכון" });
     } finally {
       setSavingProfile(false);
     }
   };
 
-  // סינון וחיפוש בזמן אמת
   const filteredQuizzes = quizzes
     .filter((quiz) => {
       const matchesSearch =
@@ -260,11 +274,10 @@ export default function DashboardPage() {
       <div className="absolute top-0 right-1/4 w-[600px] h-[300px] bg-indigo-600/10 blur-[140px] pointer-events-none rounded-full" />
       <div className="absolute bottom-10 left-10 w-[500px] h-[300px] bg-purple-600/10 blur-[140px] pointer-events-none rounded-full" />
 
-      {/* 1. תפריט עליון (Header & Navigation) */}
+      {/* Header */}
       <header className="sticky top-0 z-40 bg-[#090b10]/80 backdrop-blur-xl border-b border-white/10 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           
-          {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-2.5 group">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
               <Zap className="h-5 w-5 text-white fill-white" />
@@ -272,14 +285,13 @@ export default function DashboardPage() {
             <span className="text-xl font-black tracking-tight text-white">MegaClick</span>
           </Link>
 
-          {/* Smart Search */}
           <div className="flex-1 max-w-md hidden md:flex items-center gap-2 bg-[#141822] border border-white/10 rounded-2xl px-4 py-2 focus-within:border-indigo-500 transition-colors">
             <Search className="w-4 h-4 text-white/40" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="חיפוש בזמן אמת לפי שם חידון או תגית..."
+              placeholder="חיפוש בזמן אמת..."
               className="bg-transparent text-sm text-white placeholder-white/40 focus:outline-none w-full"
             />
             {searchQuery && (
@@ -289,7 +301,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* User Section */}
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsProfileOpen(true)}
@@ -320,7 +331,20 @@ export default function DashboardPage() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         
-        {/* Top Control Bar */}
+        {/* Error Notification Bar (אם יש שגיאה מ-Supabase) */}
+        {errorMessage && (
+          <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center justify-between text-red-300 text-sm">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Control Bar */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold text-white mb-1">החידונים שלי</h1>
@@ -328,7 +352,6 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Filter Dropdown */}
             <div className="flex items-center gap-2 bg-[#141822] border border-white/10 rounded-xl px-3 py-2 text-xs text-white/70">
               <Filter className="w-3.5 h-3.5 text-indigo-400" />
               <span>מיון:</span>
@@ -343,39 +366,30 @@ export default function DashboardPage() {
               </select>
             </div>
 
-            {/* כפתור יצירת חידון חדש */}
             <button
               onClick={handleCreateQuiz}
-              className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm shadow-lg shadow-indigo-500/25 flex items-center gap-2 active:scale-95 transition-all"
+              disabled={actionLoading}
+              className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-sm shadow-lg shadow-indigo-500/25 flex items-center gap-2 active:scale-95 transition-all cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
+              {actionLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
               <span>צור משחק חדש</span>
             </button>
           </div>
         </div>
 
-        {/* Search bar for Mobile */}
-        <div className="md:hidden mb-6">
-          <div className="flex items-center gap-2 bg-[#141822] border border-white/10 rounded-2xl px-4 py-2.5">
-            <Search className="w-4 h-4 text-white/40" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="חיפוש בזמן אמת..."
-              className="bg-transparent text-sm text-white focus:outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* תצוגת החידונים (Quiz Cards Grid) */}
+        {/* Cards Grid */}
         {filteredQuizzes.length === 0 ? (
           <div className="bg-[#12151C]/60 border border-white/10 rounded-3xl p-12 text-center max-w-lg mx-auto my-12">
             <HelpCircle className="w-12 h-12 text-indigo-400 mx-auto mb-4 opacity-80" />
             <h3 className="text-lg font-bold text-white mb-2">לא נמצאו חידונים</h3>
-            <p className="text-xs text-white/50 mb-6">לא מצאנו חידונים התואמים לחיפוש שלך, או שעדיין לא יצרת משחק ראשון.</p>
+            <p className="text-xs text-white/50 mb-6">לא מצאנו חידונים התואמים לחיפוש, או שעדיין לא יצרת משחק ראשון.</p>
             <button
               onClick={handleCreateQuiz}
+              disabled={actionLoading}
               className="bg-white text-black font-bold px-6 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
             >
               צור את החידון הראשון שלך
@@ -388,7 +402,6 @@ export default function DashboardPage() {
                 key={quiz.id}
                 className="group bg-[#12151C] border border-white/10 rounded-2xl overflow-hidden hover:border-indigo-500/50 transition-all hover:shadow-xl hover:shadow-indigo-500/10 flex flex-col"
               >
-                {/* Cover Image */}
                 <div className="h-40 bg-[#1A1E29] relative overflow-hidden flex items-center justify-center">
                   {quiz.coverImage ? (
                     <img
@@ -406,14 +419,12 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Card Body */}
                 <div className="p-5 flex-1 flex flex-col justify-between">
                   <div>
                     <h3 className="font-bold text-white text-base mb-2 group-hover:text-indigo-300 transition-colors line-clamp-1">
                       {quiz.title}
                     </h3>
                     
-                    {/* Tags */}
                     <div className="flex flex-wrap gap-1.5 mb-4">
                       {quiz.tags.map((tag, i) => (
                         <span key={i} className="text-[10px] bg-white/5 border border-white/5 px-2 py-0.5 rounded-md text-white/60">
@@ -430,7 +441,6 @@ export default function DashboardPage() {
                     </span>
                   </div>
 
-                  {/* 4 כפתורי פעולה מהירים */}
                   <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/10">
                     <button
                       onClick={() => router.push(`/editor/${quiz.id}`)}
@@ -472,7 +482,7 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* מודאל פרופיל משתמש */}
+      {/* Profile Modal */}
       {isProfileOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#12151C] border border-white/15 rounded-3xl p-6 relative shadow-2xl">
@@ -489,7 +499,7 @@ export default function DashboardPage() {
               </div>
               <div>
                 <h2 className="text-lg font-bold text-white">הגדרות פרופיל</h2>
-                <p className="text-xs text-white/50">עדכן את הפרטים האישיים של החשבון</p>
+                <p className="text-xs text-white/50">עדכן את הפרטים האישיים</p>
               </div>
             </div>
 
@@ -501,7 +511,7 @@ export default function DashboardPage() {
 
             <form onSubmit={handleUpdateProfile} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-white/70 mb-1">שם מלא / שם משתמש</label>
+                <label className="block text-xs font-medium text-white/70 mb-1">שם מלא</label>
                 <input
                   type="text"
                   value={fullName}
@@ -511,7 +521,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-white/70 mb-1">כתובת אימייל</label>
+                <label className="block text-xs font-medium text-white/70 mb-1">אימייל</label>
                 <div className="relative opacity-60">
                   <Mail className="w-4 h-4 absolute right-3.5 top-3 text-white/40" />
                   <input
@@ -526,19 +536,17 @@ export default function DashboardPage() {
               <div className="pt-2 border-t border-white/10">
                 <h4 className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
-                  {isGoogleUser ? "חשבון גוגל (שינוי סיסמה מנוטרל)" : "שינוי סיסמה"}
+                  {isGoogleUser ? "חשבון גוגל" : "שינוי סיסמה"}
                 </h4>
 
                 {!isGoogleUser && (
-                  <div className="space-y-3">
-                    <input
-                      type="password"
-                      placeholder="סיסמה חדשה"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full bg-[#181B24] border border-white/10 rounded-xl py-2.5 px-3.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
+                  <input
+                    type="password"
+                    placeholder="סיסמה חדשה"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-[#181B24] border border-white/10 rounded-xl py-2.5 px-3.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  />
                 )}
               </div>
 
@@ -557,13 +565,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* מחיקת חידון - Modal האישור */}
+      {/* Delete Modal */}
       {deleteTargetId && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#12151C] border border-red-500/30 rounded-3xl p-6 text-center shadow-2xl">
             <Trash2 className="w-10 h-10 text-red-400 mx-auto mb-3" />
             <h3 className="text-base font-bold text-white mb-1">למחוק את החידון?</h3>
-            <p className="text-xs text-white/50 mb-6">פעולה זו היא לצמיתות ולא ניתן יהיה לשחזר את המשחק.</p>
+            <p className="text-xs text-white/50 mb-6">פעולה זו היא לצמיתות.</p>
             <div className="flex gap-3">
               <button
                 onClick={() => setDeleteTargetId(null)}
