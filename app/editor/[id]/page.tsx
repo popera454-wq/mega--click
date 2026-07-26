@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -40,6 +40,18 @@ import {
   Music
 } from "lucide-react";
 
+// פונקציית עזר בטוחה ליצירת מזהים (תומכת גם בסביבות שאינן מאובטחות בהן crypto.randomUUID לא זמין)
+const generateId = () => {
+  if (typeof window !== "undefined" && window.crypto && typeof window.crypto.randomUUID === "function") {
+    try {
+      return window.crypto.randomUUID();
+    } catch {
+      // נפילה לגיבוי
+    }
+  }
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+};
+
 // טיפוסי הנתונים
 export interface SlideOption {
   id: string;
@@ -70,10 +82,23 @@ export interface Slide {
 
 const supabase = createClient();
 
-export default function EditorPage({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = use(params);
-  const gameId = resolvedParams.id;
+export default function EditorPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.resolve(params).then((resolved) => {
+      if (isMounted && resolved?.id) {
+        setResolvedId(resolved.id);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [params]);
+
+  const gameId = resolvedId || "";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -147,6 +172,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
   // Load Data
   useEffect(() => {
+    if (!gameId) return;
     let isMounted = true;
 
     const fetchGameData = async () => {
@@ -187,7 +213,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         setSlides(loadedSlides);
         setActiveSlideId(loadedSlides[0].id);
       } else {
-        await createNewSlide("trivia");
+        await createNewSlide("trivia", gameId);
       }
 
       const { data: teamsData } = await supabase.from("teams").select("*").eq("game_id", gameId);
@@ -206,6 +232,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   const activeSlide = slides.find((s) => s.id === activeSlideId) || slides[0];
 
   const saveAllChanges = async (updatedSlides = slides, updatedTitle = gameTitle) => {
+    if (!gameId) return;
     setSaving(true);
     try {
       await supabase.from("games").update({
@@ -243,18 +270,18 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     }
   };
 
-  const createNewSlide = async (type: Slide["slide_type"] = "trivia") => {
-    const newSlideId = crypto.randomUUID();
+  const createNewSlide = async (type: Slide["slide_type"] = "trivia", targetGameId = gameId) => {
+    const newSlideId = generateId();
     const newSlide: Slide = {
       id: newSlideId,
-      game_id: gameId,
+      game_id: targetGameId,
       title: "שאלה חדשה",
       slide_type: type,
       options: [
-        { id: "1", text: "תשובה 1", isCorrect: true },
-        { id: "2", text: "תשובה 2", isCorrect: false },
-        { id: "3", text: "תשובה 3", isCorrect: false },
-        { id: "4", text: "תשובה 4", isCorrect: false },
+        { id: generateId(), text: "תשובה 1", isCorrect: true },
+        { id: generateId(), text: "תשובה 2", isCorrect: false },
+        { id: generateId(), text: "תשובה 3", isCorrect: false },
+        { id: generateId(), text: "תשובה 4", isCorrect: false },
       ],
       points: 100,
       time_limit: 20,
@@ -265,15 +292,14 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     await saveAllChanges(nextSlides);
   };
 
-  const updateActiveSlide = async (field: keyof Slide, value: any) => {
+  const updateActiveSlide = (field: keyof Slide, value: any) => {
     if (!activeSlideId) return;
     const nextSlides = slides.map((s) => (s.id === activeSlideId ? { ...s, [field]: value } : s));
     setSlides(nextSlides);
-    await saveAllChanges(nextSlides);
   };
 
   const duplicateSlide = async (slide: Slide) => {
-    const newId = crypto.randomUUID();
+    const newId = generateId();
     const dupSlide = { ...slide, id: newId, title: `${slide.title} (עותק)` };
     const nextSlides = [...slides, dupSlide];
     setSlides(nextSlides);
@@ -329,17 +355,17 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
       const importedSlides: Slide[] = data.map((row, index) => {
         const opts: SlideOption[] = [];
-        if (row["תשובה 1"]) opts.push({ id: "1", text: String(row["תשובה 1"]), isCorrect: String(row["נכונה 1 (כן/לא)"]).trim() === "כן" });
-        if (row["תשובה 2"]) opts.push({ id: "2", text: String(row["תשובה 2"]), isCorrect: String(row["נכונה 2 (כן/לא)"]).trim() === "כן" });
-        if (row["תשובה 3"]) opts.push({ id: "3", text: String(row["תשובה 3"]), isCorrect: String(row["נכונה 3 (כן/לא)"]).trim() === "כן" });
-        if (row["תשובה 4"]) opts.push({ id: "4", text: String(row["תשובה 4"]), isCorrect: String(row["נכונה 4 (כן/לא)"]).trim() === "כן" });
+        if (row["תשובה 1"]) opts.push({ id: generateId(), text: String(row["תשובה 1"]), isCorrect: String(row["נכונה 1 (כן/לא)"]).trim() === "כן" });
+        if (row["תשובה 2"]) opts.push({ id: generateId(), text: String(row["תשובה 2"]), isCorrect: String(row["נכונה 2 (כן/לא)"]).trim() === "כן" });
+        if (row["תשובה 3"]) opts.push({ id: generateId(), text: String(row["תשובה 3"]), isCorrect: String(row["נכונה 3 (כן/לא)"]).trim() === "כן" });
+        if (row["תשובה 4"]) opts.push({ id: generateId(), text: String(row["תשובה 4"]), isCorrect: String(row["נכונה 4 (כן/לא)"]).trim() === "כן" });
 
         return {
-          id: crypto.randomUUID(),
+          id: generateId(),
           game_id: gameId,
           title: String(row["נוסח השאלה"] || `שאלה מיובאת ${index + 1}`),
           slide_type: (row["סוג שקופית"] as any) || "trivia",
-          options: opts.length > 0 ? opts : [{ id: "1", text: "תשובה 1", isCorrect: true }],
+          options: opts.length > 0 ? opts : [{ id: generateId(), text: "תשובה 1", isCorrect: true }],
           points: Number(row["ניקוד"]) || 100,
           time_limit: Number(row["זמן מענה (שניות)"]) || 20,
         };
@@ -400,11 +426,11 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
       const data = await res.json();
       if (data.success && data.slides) {
         const createdSlides: Slide[] = data.slides.map((s: any) => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           game_id: gameId,
           title: String(s.title || "שאלה מחוללת"),
           slide_type: s.type || aiSlideType,
-          options: s.options || [],
+          options: Array.isArray(s.options) ? s.options.map((o: any) => ({ ...o, id: generateId() })) : [],
           points: s.points || 100,
           time_limit: s.timeLimit || 20,
         }));
@@ -422,67 +448,39 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   const handleAiAssistSlide = async (action: "rephrase" | "generate_wrong" | "generate_text") => {
     if (!activeSlide) return;
     setSaving(true);
-    setTimeout(async () => {
-      let updatedSlide = { ...activeSlide };
+    setTimeout(() => {
       if (action === "rephrase") {
-        updatedSlide.title = `${activeSlide.title} (מנוסח מחדש ע"י AI)`;
+        updateActiveSlide("title", `${activeSlide.title} (מנוסח מחדש ע"י AI)`);
       } else if (action === "generate_wrong") {
-        updatedSlide.options = [
-          ...activeSlide.options,
-          { id: crypto.randomUUID(), text: "תשובה מוטעית (AI)", isCorrect: false },
-          { id: crypto.randomUUID(), text: "עוד טעות (AI)", isCorrect: false },
+        const updatedOpts = [...activeSlide.options,
+          { id: generateId(), text: "תשובה מוטעית (AI)", isCorrect: false },
+          { id: generateId(), text: "עוד טעות (AI)", isCorrect: false },
         ];
+        updateActiveSlide("options", updatedOpts);
       } else if (action === "generate_text") {
-        updatedSlide.media_config = { ...activeSlide.media_config, textBody: "טקסט זה חולל אוטומטית על ידי העוזר החכם בהתאם לכותרת השקופית." };
+        updateActiveSlide("media_config", { ...activeSlide.media_config, textBody: "טקסט זה חולל אוטומטית על ידי העוזר החכם בהתאם לכותרת השקופית." });
       }
-      
-      const nextSlides = slides.map((s) => (s.id === activeSlideId ? updatedSlide : s));
-      setSlides(nextSlides);
-      await saveAllChanges(nextSlides);
       setSaving(false);
     }, 1000);
   };
 
-  const handleSelectMedia = async (url: string) => {
+  const handleSelectMedia = (url: string) => {
     if (!mediaPickerTarget) return;
 
-    let updatedSlide = activeSlide ? { ...activeSlide } : null;
-    let nextSlides = [...slides];
-
-    if (mediaPickerTarget.type === "question_image" && updatedSlide) {
-      updatedSlide.question_image = url;
-    } else if (mediaPickerTarget.type === "custom_bg" && updatedSlide) {
-      updatedSlide.custom_bg = url;
-    } else if (mediaPickerTarget.type === "media_before" && updatedSlide) {
-      updatedSlide.media_before = url;
-    } else if (mediaPickerTarget.type === "media_after" && updatedSlide) {
-      updatedSlide.media_after = url;
-    } else if (mediaPickerTarget.type === "cover_image") {
-      const newGen = { ...generalSettings, cover_image: url };
-      setGeneralSettings(newGen);
-      setMediaPickerTarget(null);
-      await saveAllChanges(slides, gameTitle);
-      return;
-    } else if (mediaPickerTarget.type === "option_image" && mediaPickerTarget.optionId && updatedSlide) {
-      updatedSlide.options = updatedSlide.options.map((o) => (o.id === mediaPickerTarget.optionId ? { ...o, imageUrl: url } : o));
-    } else if (mediaPickerTarget.type === "settings_bg" && mediaPickerTarget.settingKey) {
-      const newDesign = { ...designSettings, [mediaPickerTarget.settingKey]: url };
-      setDesignSettings(newDesign);
-      setMediaPickerTarget(null);
-      await saveAllChanges(slides, gameTitle);
-      return;
-    } else if (mediaPickerTarget.type === "settings_sound" && mediaPickerTarget.settingKey) {
-      const newDesign = { ...designSettings, sounds: { ...designSettings.sounds, [mediaPickerTarget.settingKey]: url } };
-      setDesignSettings(newDesign);
-      setMediaPickerTarget(null);
-      await saveAllChanges(slides, gameTitle);
-      return;
+    if (mediaPickerTarget.type === "question_image") updateActiveSlide("question_image", url);
+    else if (mediaPickerTarget.type === "custom_bg") updateActiveSlide("custom_bg", url);
+    else if (mediaPickerTarget.type === "media_before") updateActiveSlide("media_before", url);
+    else if (mediaPickerTarget.type === "media_after") updateActiveSlide("media_after", url);
+    else if (mediaPickerTarget.type === "cover_image") setGeneralSettings({ ...generalSettings, cover_image: url });
+    else if (mediaPickerTarget.type === "option_image" && mediaPickerTarget.optionId) {
+      const opts = activeSlide.options.map((o) => (o.id === mediaPickerTarget.optionId ? { ...o, imageUrl: url } : o));
+      updateActiveSlide("options", opts);
+    } 
+    else if (mediaPickerTarget.type === "settings_bg" && mediaPickerTarget.settingKey) {
+      setDesignSettings({ ...designSettings, [mediaPickerTarget.settingKey]: url });
     }
-
-    if (updatedSlide && activeSlideId) {
-      nextSlides = slides.map((s) => (s.id === activeSlideId ? updatedSlide! : s));
-      setSlides(nextSlides);
-      await saveAllChanges(nextSlides);
+    else if (mediaPickerTarget.type === "settings_sound" && mediaPickerTarget.settingKey) {
+      setDesignSettings({ ...designSettings, sounds: { ...designSettings.sounds, [mediaPickerTarget.settingKey]: url } });
     }
 
     setMediaPickerTarget(null);
@@ -631,7 +629,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               return (
                 <button
                   key={st.id}
-                  onClick={() => updateActiveSlide("slide_type", st.id)}
+                  onClick={() => { updateActiveSlide("slide_type", st.id); saveAllChanges(); }}
                   className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all ${isSelected ? "bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/20" : "text-white/60 hover:text-white hover:bg-white/5"}`}
                 >
                   <Icon className="w-4 h-4" />
@@ -788,7 +786,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     </div>
 
                     {activeSlide.options.length < 6 && (
-                      <button onClick={() => { updateActiveSlide("options", [...activeSlide.options, { id: crypto.randomUUID(), text: `תשובה ${activeSlide.options.length + 1}`, isCorrect: false }]); }} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1">
+                      <button onClick={() => { updateActiveSlide("options", [...activeSlide.options, { id: generateId(), text: `תשובה ${activeSlide.options.length + 1}`, isCorrect: false }]); }} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1">
                         <Plus className="w-3.5 h-3.5" /> <span>הוסף תשובה נוספת</span>
                       </button>
                     )}
@@ -1235,7 +1233,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
 
-      {/* MEDIA PICKER MODAL (4 Options Rule) */}
+      {/* MEDIA PICKER MODAL */}
       {mediaPickerTarget && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-[#12151c] border border-white/15 rounded-3xl p-6 relative shadow-2xl">
