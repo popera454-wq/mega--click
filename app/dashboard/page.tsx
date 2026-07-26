@@ -107,27 +107,44 @@ export default function DashboardPage() {
     router.refresh();
   };
 
-  // 2. יצירת חידון חדש אמיתי ב-DB
+  // 2. יצירת חידון חדש אמיתי ב-DB (הפונקציה המעודכנת)
   const handleCreateQuiz = async () => {
-    if (!user) return;
+    if (!user) {
+      alert("משתמש לא מחובר");
+      return;
+    }
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("games")
-      .insert([
-        {
-          user_id: user.id,
-          title: "חידון חדש ללא שם",
-          settings: { tags: ["טריוויה"] },
-        },
-      ])
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from("games")
+        .insert([
+          {
+            user_id: user.id,
+            title: "חידון חדש ללא שם",
+            settings: { tags: ["טריוויה"] },
+          },
+        ])
+        .select()
+        .single();
 
-    if (!error && data) {
-      router.push(`/editor/${data.id}`);
-    } else {
-      console.error("שגיאה ביצירת המשחק:", error);
+      if (error) {
+        console.error("שגיאה ביצירת המשחק ב-Supabase:", error);
+        alert(`שגיאה ביצירת המשחק: ${error.message}\n(בדוק הרשאות RLS ב-Supabase)`);
+        setLoading(false);
+        return;
+      }
+
+      if (data && data.id) {
+        // מעבר לעמוד העורך
+        router.push(`/editor/${data.id}`);
+      } else {
+        alert("לא התקבל מזהה משחק מ-Supabase");
+        setLoading(false);
+      }
+    } catch (err: any) {
+      console.error("שגיאה בלתי צפויה:", err);
+      alert(`שגיאה בלתי צפויה: ${err.message || err}`);
       setLoading(false);
     }
   };
@@ -413,7 +430,7 @@ export default function DashboardPage() {
                     </span>
                   </div>
 
-                  {/* 4 כפתורי פעולה מהירים מוגדרים ומחוברים לפי האפיון */}
+                  {/* 4 כפתורי פעולה מהירים */}
                   <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/10">
                     <button
                       onClick={() => router.push(`/editor/${quiz.id}`)}
@@ -455,7 +472,7 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* מודאל פרופיל משתמש (User Profile Settings) */}
+      {/* מודאל פרופיל משתמש */}
       {isProfileOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#12151C] border border-white/15 rounded-3xl p-6 relative shadow-2xl">
