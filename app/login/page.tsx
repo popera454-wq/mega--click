@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Zap, Mail, Lock, ArrowLeft, Loader2, KeyRound } from "lucide-react";
+import { Zap, Mail, Lock, ArrowLeft, Loader2 } from "lucide-react";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -17,7 +17,13 @@ export default function AuthPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
-  // בדיקה מהירה בטעינה אם המשתמש כבר מחובר
+  // מעבר מצב כולל ניקוי הודעות ושדות
+  const switchMode = (newMode: "login" | "signup" | "forgot") => {
+    setMode(newMode);
+    setMessage(null);
+  };
+
+  // בדיקה בטעינה אם המשתמש כבר מחובר
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -67,6 +73,7 @@ export default function AuthPage() {
   // התחברות באמצעות Google
   const handleGoogleLogin = async () => {
     setLoading(true);
+    setMessage(null);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -81,7 +88,7 @@ export default function AuthPage() {
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen bg-[#090b10] flex items-center justify-center text-white">
+      <div className="min-h-screen bg-[#090b10] flex items-center justify-center text-white" dir="rtl">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
       </div>
     );
@@ -91,7 +98,7 @@ export default function AuthPage() {
     <div className="min-h-screen bg-[#090b10] text-[#EDEDED] font-sans flex items-center justify-center p-4 relative overflow-hidden" dir="rtl">
       
       {/* Background Glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/15 blur-[120px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/15 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="w-full max-w-md bg-[#12151C]/90 border border-white/15 backdrop-blur-2xl rounded-[28px] p-8 shadow-2xl relative z-10">
         
@@ -120,7 +127,7 @@ export default function AuthPage() {
         {/* Form */}
         <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-[#C5C7D0] mb-1">דוא&quot;ל</label>
+            <label className="block text-xs font-medium text-[#C5C7D0] mb-1">אימייל</label>
             <div className="relative">
               <Mail className="w-4 h-4 absolute right-3.5 top-3.5 text-[#C5C7D0]/50" />
               <input
@@ -141,7 +148,7 @@ export default function AuthPage() {
                 {mode === "login" && (
                   <button
                     type="button"
-                    onClick={() => setMode("forgot")}
+                    onClick={() => switchMode("forgot")}
                     className="text-[11px] text-indigo-400 hover:underline"
                   >
                     שכחת סיסמה?
@@ -165,7 +172,7 @@ export default function AuthPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-white text-black py-3 rounded-xl text-sm font-bold hover:bg-slate-200 transition-transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
+            className="w-full bg-white text-black py-3 rounded-xl text-sm font-bold hover:bg-slate-200 transition-transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer"
           >
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
             {mode === "login" && "התחבר"}
@@ -174,19 +181,20 @@ export default function AuthPage() {
           </button>
         </form>
 
-        {/* Divider */}
+        {/* Divider & Google Auth */}
         {mode !== "forgot" && (
           <>
             <div className="relative my-6 text-center">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10" /></div>
               <span className="relative bg-[#12151C] px-3 text-[11px] text-[#C5C7D0]/60 font-medium">או</span>
             </div>
 
-            {/* Google Button */}
+            {/* Google Button - Fixed type="button" */}
             <button
+              type="button"
               onClick={handleGoogleLogin}
               disabled={loading}
-              className="w-full bg-[#181B24] hover:bg-[#202430] border border-white/10 text-white py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-3"
+              className="w-full bg-[#181B24] hover:bg-[#202430] border border-white/10 text-white py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.2 9 5 12 5z" />
@@ -203,8 +211,8 @@ export default function AuthPage() {
         <div className="mt-8 text-center text-xs text-[#C5C7D0]">
           {mode === "login" && (
             <p>
-              אין לך חשבוןעדיין?{" "}
-              <button onClick={() => setMode("signup")} className="text-indigo-400 font-bold hover:underline">
+              אין לך חשבון עדיין?{" "}
+              <button type="button" onClick={() => switchMode("signup")} className="text-indigo-400 font-bold hover:underline cursor-pointer">
                 הרשם עכשיו
               </button>
             </p>
@@ -212,14 +220,14 @@ export default function AuthPage() {
           {mode === "signup" && (
             <p>
               כבר יש לך חשבון?{" "}
-              <button onClick={() => setMode("login")} className="text-indigo-400 font-bold hover:underline">
+              <button type="button" onClick={() => switchMode("login")} className="text-indigo-400 font-bold hover:underline cursor-pointer">
                 התחבר
               </button>
             </p>
           )}
           {mode === "forgot" && (
-            <button onClick={() => setMode("login")} className="text-indigo-400 font-bold hover:underline flex items-center gap-1 mx-auto">
-              <ArrowLeft className="w-3 h-3 transform rotate-180" /> חזרה להתוודעות
+            <button type="button" onClick={() => switchMode("login")} className="text-indigo-400 font-bold hover:underline flex items-center gap-1 mx-auto cursor-pointer">
+              <ArrowLeft className="w-3 h-3 transform rotate-180" /> חזרה להתחברות
             </button>
           )}
         </div>
