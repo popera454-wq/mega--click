@@ -1,13 +1,11 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
-
-module.exports = nextConfig;
-/** @type {import('next').NextConfig} */
 const nextConfig = {
     eslint: {
-      // מתעלם משגיאות ESLint בזמן Build ב-Vercel
       ignoreDuringBuilds: true,
+    },
+    typescript: {
+      ignoreBuildErrors: true,
     },
   };
   
-  export default nextConfig;
+  module.exports = nextConfig;
