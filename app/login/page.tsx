@@ -120,7 +120,7 @@ export default function AuthPage() {
         {/* Form */}
         <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-[#C5C7D0] mb-1">דוא"ל</label>
+            <label className="block text-xs font-medium text-[#C5C7D0] mb-1">דוא&quot;ל\</label>
             <div className="relative">
               <Mail className="w-4 h-4 absolute right-3.5 top-3.5 text-[#C5C7D0]/50" />
               <input
