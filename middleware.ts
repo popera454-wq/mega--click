@@ -8,16 +8,25 @@ export async function middleware(request: NextRequest) {
     },
   })
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  // אם המשתנים חסרים - המשך ללא בדיקת Auth כדי למנוע קריסת שרת (500 Error)
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error("Supabase environment variables are missing!")
+    return response
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           response = NextResponse.next({
             request,
           })
@@ -33,12 +42,12 @@ export async function middleware(request: NextRequest) {
 
   // אם המשתמש מחובר ומנסה להיכנס לדף התחברות/הרשמה - העבר אותו לדאשבורד
   if (user && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup')) {
-    return NextResponse.redirect(newURL('/dashboard', request.url))
+    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  // אם המשתמש לא מחובר ומנסה להיכנס לאזור מוגן (כמו דאשבורד או יצירת משחק)
+  // אם המשתמש לא מחובר ומנסה להיכנס לאזור מוגן
   if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    return NextResponse.redirect(newURL('/login', request.url))
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return response
