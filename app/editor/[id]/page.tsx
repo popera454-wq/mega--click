@@ -27,16 +27,14 @@ import {
   Check,
   X,
   Share2,
-  Music,
-  Users,
-  Trophy,
   Sliders,
   Layers,
   Loader2,
-  Globe,
   Link as LinkIcon,
   Wand2,
-  Grid
+  Grid,
+  Users,
+  Trophy
 } from "lucide-react";
 
 // טיפוסי הנתונים של סביבת העריכה
@@ -105,7 +103,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   const [aiCount, setAiCount] = useState(3);
   const [aiGenerating, setAiGenerating] = useState(false);
 
-  // Game Settings (8 Tabs) State
+  // Game Settings State
   const [generalSettings, setGeneralSettings] = useState({
     title: "",
     cover_image: "",
@@ -142,111 +140,159 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamColor, setNewTeamColor] = useState("#6366f1");
 
-  // 1. טעינת נתוני המשחק, השקופיות, ההגדרות, הקבוצות והמשתתפים
+  // 1. טעינת נתוני המשחק, השקופיות, ההגדרות, הקבוצות והמשתתפים בצורה מאובטחת
   useEffect(() => {
+    let isMounted = true;
+
     const fetchGameData = async () => {
-      setLoading(true);
+      try {
+        setLoading(true);
 
-      // א. שליפת המשחק וההגדרות
-      const { data: game, error: gameErr } = await supabase
-        .from("games")
-        .select("*")
-        .eq("id", gameId)
-        .single();
+        // א. שליפת המשחק וההגדרות
+        const { data: game, error: gameErr } = await supabase
+          .from("games")
+          .select("*")
+          .eq("id", gameId)
+          .maybeSingle();
 
-      if (gameErr || !game) {
-        router.push("/dashboard");
-        return;
+        if (gameErr || !game) {
+          router.push("/dashboard");
+          return;
+        }
+
+        if (!isMounted) return;
+
+        setGameTitle(game.title || "חידון ללא שם");
+        setGeneralSettings(game.general_settings || { title: game.title, cover_image: game.cover_image || "", header_text: game.header_text || "" });
+        if (game.design_settings) setDesignSettings(game.design_settings);
+        if (game.flow_settings) setFlowSettings(game.flow_settings);
+        if (game.leaderboard_settings) setLeaderboardSettings(game.leaderboard_settings);
+
+        // ב. שליפת השקופיות
+        const { data: slidesData } = await supabase
+          .from("slides")
+          .select("*")
+          .eq("game_id", gameId)
+          .order("created_at", { ascending: true });
+
+        if (!isMounted) return;
+
+        if (slidesData && slidesData.length > 0) {
+          const loadedSlides: Slide[] = slidesData.map((s) => ({
+            id: s.id,
+            game_id: s.game_id,
+            title: s.title || "שאלה חדשה",
+            slide_type: s.slide_type || "trivia",
+            options: s.options || [],
+            points: s.points ?? 100,
+            time_limit: s.time_limit ?? 20,
+            media_before: s.media_before || "",
+            media_after: s.media_after || "",
+            question_image: s.question_image || "",
+            custom_bg: s.custom_bg || "",
+            media_config: s.media_config || {},
+          }));
+          setSlides(loadedSlides);
+          setActiveSlideId(loadedSlides[0].id);
+        } else {
+          // יצירת שקופית ראשונית בצורה בטוחה במידה והמשחק ריק
+          const defaultSlideId = crypto.randomUUID();
+          const defaultSlide: Slide = {
+            id: defaultSlideId,
+            game_id: gameId,
+            title: "שאלה ראשונה",
+            slide_type: "trivia",
+            options: [
+              { id: "1", text: "תשובה 1", isCorrect: true },
+              { id: "2", text: "תשובה 2", isCorrect: false },
+              { id: "3", text: "תשובה 3", isCorrect: false },
+              { id: "4", text: "תשובה 4", isCorrect: false },
+            ],
+            points: 100,
+            time_limit: 20,
+          };
+
+          await supabase.from("slides").insert({
+            id: defaultSlide.id,
+            game_id: gameId,
+            title: defaultSlide.title,
+            slide_type: defaultSlide.slide_type,
+            options: defaultSlide.options,
+            points: defaultSlide.points,
+            time_limit: defaultSlide.time_limit,
+          });
+
+          if (isMounted) {
+            setSlides([defaultSlide]);
+            setActiveSlideId(defaultSlideId);
+          }
+        }
+
+        // ג. שליפת קבוצות ומשתתפים בבטחה
+        const { data: teamsData } = await supabase.from("teams").select("*").eq("game_id", gameId);
+        if (teamsData && isMounted) setTeams(teamsData);
+
+        const { data: participantsData } = await supabase.from("participants").select("*").eq("game_id", gameId);
+        if (participantsData && isMounted) setParticipants(participantsData);
+
+      } catch (err) {
+        console.error("Error loading game data:", err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
-
-      setGameTitle(game.title || "חידון ללא שם");
-      setGeneralSettings(game.general_settings || { title: game.title, cover_image: game.cover_image || "", header_text: game.header_text || "" });
-      if (game.design_settings) setDesignSettings(game.design_settings);
-      if (game.flow_settings) setFlowSettings(game.flow_settings);
-      if (game.leaderboard_settings) setLeaderboardSettings(game.leaderboard_settings);
-
-      // ב. שליפת השקופיות
-      const { data: slidesData } = await supabase
-        .from("slides")
-        .select("*")
-        .eq("game_id", gameId)
-        .order("created_at", { ascending: true });
-
-      if (slidesData && slidesData.length > 0) {
-        const loadedSlides: Slide[] = slidesData.map((s) => ({
-          id: s.id,
-          game_id: s.game_id,
-          title: s.title || "שאלה חדשה",
-          slide_type: s.slide_type || "trivia",
-          options: s.options || [],
-          points: s.points ?? 100,
-          time_limit: s.time_limit ?? 20,
-          media_before: s.media_before || "",
-          media_after: s.media_after || "",
-          question_image: s.question_image || "",
-          custom_bg: s.custom_bg || "",
-          media_config: s.media_config || {},
-        }));
-        setSlides(loadedSlides);
-        setActiveSlideId(loadedSlides[0].id);
-      } else {
-        // יצירת שקופית ראשונה ברירת מחדל
-        await createNewSlide("trivia");
-      }
-
-      // ג. שליפת קבוצות ומשתתפים
-      const { data: teamsData } = await supabase.from("teams").select("*").eq("game_id", gameId);
-      if (teamsData) setTeams(teamsData);
-
-      const { data: participantsData } = await supabase.from("participants").select("*").eq("game_id", gameId);
-      if (participantsData) setParticipants(participantsData);
-
-      setLoading(false);
     };
 
     fetchGameData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [gameId, supabase, router]);
 
   // השקופית הפעילה כעת בעורך
-  const activeSlide = slides.find((s) => s.id === activeSlideId) || slides[0];
+  const activeSlide = slides.find((s) => s.id === activeSlideId) || slides[0] || null;
 
   // 2. שמירת כל השינויים ב-Supabase DB
   const saveAllChanges = async (updatedSlides = slides, updatedTitle = gameTitle) => {
     setSaving(true);
 
-    // עדכון פרטי המשחק וההגדרות
-    await supabase
-      .from("games")
-      .update({
-        title: updatedTitle,
-        header_text: generalSettings.header_text,
-        general_settings: generalSettings,
-        design_settings: designSettings,
-        flow_settings: flowSettings,
-        leaderboard_settings: leaderboardSettings,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", gameId);
+    try {
+      // עדכון פרטי המשחק וההגדרות
+      await supabase
+        .from("games")
+        .update({
+          title: updatedTitle,
+          header_text: generalSettings.header_text,
+          general_settings: generalSettings,
+          design_settings: designSettings,
+          flow_settings: flowSettings,
+          leaderboard_settings: leaderboardSettings,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", gameId);
 
-    // שמירת כל השקופיות
-    for (const slide of updatedSlides) {
-      await supabase.from("slides").upsert({
-        id: slide.id,
-        game_id: gameId,
-        title: slide.title,
-        slide_type: slide.slide_type,
-        options: slide.options,
-        points: slide.points,
-        time_limit: slide.time_limit,
-        media_before: slide.media_before,
-        media_after: slide.media_after,
-        question_image: slide.question_image,
-        custom_bg: slide.custom_bg,
-        media_config: slide.media_config,
-      });
+      // שמירת כל השקופיות
+      for (const slide of updatedSlides) {
+        await supabase.from("slides").upsert({
+          id: slide.id,
+          game_id: gameId,
+          title: slide.title,
+          slide_type: slide.slide_type,
+          options: slide.options,
+          points: slide.points,
+          time_limit: slide.time_limit,
+          media_before: slide.media_before,
+          media_after: slide.media_after,
+          question_image: slide.question_image,
+          custom_bg: slide.custom_bg,
+          media_config: slide.media_config,
+        });
+      }
+    } catch (err) {
+      console.error("Error saving changes:", err);
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
   };
 
   // יצירת שקופית חדשה
@@ -299,7 +345,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     await supabase.from("slides").delete().eq("id", slideId);
   };
 
-  // 3. ייבוא וייצוא ב-Excel
+  // ייבוא/ייצוא Excel ו-PDF
   const downloadExcelTemplate = () => {
     const templateData = [
       {
@@ -364,7 +410,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     reader.readAsBinaryString(file);
   };
 
-  // 4. הורדת כל השאלות ל-PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
     doc.setFont("helvetica", "bold");
@@ -392,7 +437,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     doc.save(`${gameTitle}_Questions.pdf`);
   };
 
-  // 5. העלאה למאגר הציבורי
   const uploadSlideToPublicBank = async (slide: Slide) => {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("public_question_bank").insert([
@@ -406,7 +450,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     alert("השאלה הועלתה בהצלחה למאגר הציבורי!");
   };
 
-  // 6. מחולל AI (מנגנון חינמי מול API Route)
   const handleGenerateAI = async () => {
     if (!aiPrompt) return;
     setAiGenerating(true);
@@ -444,7 +487,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     }
   };
 
-  // 7. עוזר AI מובנה בשאלה (ניסוח מחדש / הצעת תשובות מוטעות)
   const handleAiAssistSlide = async (action: "rephrase" | "generate_wrong") => {
     if (!activeSlide) return;
     setSaving(true);
@@ -462,9 +504,8 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     setSaving(false);
   };
 
-  // 8. טיפול בבחירת/העלאת מדיה מכל 4 המקורות
   const handleSelectMedia = (url: string) => {
-    if (!mediaPickerTarget) return;
+    if (!mediaPickerTarget || !activeSlide) return;
 
     if (mediaPickerTarget.type === "question_image") {
       updateActiveSlide("question_image", url);
@@ -480,7 +521,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
     setMediaPickerTarget(null);
   };
 
-  // מחולל תמונת AI בחינם במיטבו (Pollinations AI Engine)
   const handleGenerateAiImage = () => {
     if (!aiImagePrompt) return;
     setAiImageLoading(true);
@@ -495,8 +535,9 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#090b10] flex items-center justify-center text-white" dir="rtl">
+      <div className="min-h-screen bg-[#090b10] flex flex-col items-center justify-center text-white gap-3" dir="rtl">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+        <p className="text-xs text-white/50">טוען את עורך המשחק...</p>
       </div>
     );
   }
@@ -506,8 +547,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
       
       {/* ================= 1. הסרגל העליון (TOP BAR) ================= */}
       <header className="h-16 bg-[#0d1017] border-b border-white/10 px-6 flex items-center justify-between z-30 shrink-0">
-        
-        {/* ימין: חזרה + שם המשחק */}
         <div className="flex items-center gap-4">
           <Link
             href="/dashboard"
@@ -535,7 +574,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
           </div>
         </div>
 
-        {/* שמאל: כפתורי פעולה עליונים */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsPreviewOpen(true)}
@@ -568,17 +606,13 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         
         {/* ================= 2. חלק א': רשימת השאלות והכלים (SIDEBAR) ================= */}
         <aside className="w-80 bg-[#0d1017]/90 border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
-          
-          {/* כלי עזר עליונים (XL, DB, AI) */}
           <div className="p-3 border-b border-white/10 grid grid-cols-3 gap-2 bg-[#12151c]">
-            {/* Excel Dropdown/Upload */}
             <label className="flex flex-col items-center justify-center p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 cursor-pointer text-center transition-all">
               <Upload className="w-4 h-4 text-emerald-400 mb-1" />
               <span className="text-[10px] font-medium text-white/80">ייבוא Excel</span>
               <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} className="hidden" />
             </label>
 
-            {/* Public Bank Modal Trigger */}
             <button
               onClick={() => setIsPublicBankOpen(true)}
               className="flex flex-col items-center justify-center p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-center transition-all"
@@ -587,7 +621,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               <span className="text-[10px] font-medium text-white/80">משיכה ממאגר</span>
             </button>
 
-            {/* AI Generator Modal Trigger */}
             <button
               onClick={() => setIsAiModalOpen(true)}
               className="flex flex-col items-center justify-center p-2 rounded-xl bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 hover:from-indigo-500/30 hover:to-purple-500/30 border border-indigo-500/30 text-center transition-all group"
@@ -635,7 +668,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     </div>
                   </div>
 
-                  {/* כפתורי פעולה על השקופית ברשימה */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => {
@@ -675,7 +707,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
             })}
           </div>
 
-          {/* כפתור הוספת שקופית חדשה בתחתית */}
           <div className="p-3 border-t border-white/10 bg-[#0d1017]">
             <button
               onClick={() => createNewSlide(activeSlide?.slide_type || "trivia")}
@@ -690,7 +721,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         {/* ================= 3. חלק ב': עורך השקופית והשאלות (MAIN EDITOR CANVAS) ================= */}
         <main className="flex-1 bg-[#090b10] flex flex-col overflow-y-auto p-6 relative">
           
-          {/* בחירת סוג שקופית (5 כפתורים עליונים) */}
           <div className="max-w-4xl mx-auto w-full mb-6 bg-[#12151c] border border-white/10 p-1.5 rounded-2xl grid grid-cols-5 gap-1.5 shadow-xl">
             {[
               { id: "trivia", label: "טריוויה", icon: HelpCircle },
@@ -721,16 +751,13 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
             })}
           </div>
 
-          {/* משטח העריכה המרכזי של השאלה */}
           {activeSlide && (
             <div className="max-w-4xl mx-auto w-full bg-[#12151c] border border-white/10 rounded-3xl p-6 shadow-2xl flex flex-col gap-6">
               
-              {/* כותרת השאלה + עוזר AI מובנה */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold text-white/70">נוסח השאלה / כותרת השקופית</label>
                   
-                  {/* עוזר AI מובנה בשאלה */}
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAiAssistSlide("rephrase")}
@@ -760,7 +787,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 />
               </div>
 
-              {/* במידה וזו שקופית טקסט חופשי */}
               {activeSlide.slide_type === "text_slide" && (
                 <div>
                   <label className="block text-xs font-bold text-white/70 mb-2">תוכן השקופית (טקסט חופשי/הסברים)</label>
@@ -776,7 +802,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* במידה וזו שקופית מדיה */}
               {activeSlide.slide_type === "media_slide" && (
                 <div className="space-y-4">
                   <label className="block text-xs font-bold text-white/70">קובץ / קישור מדיה (וידאו / תמונה / יוטיוב)</label>
@@ -800,7 +825,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* עריכת תשובות (עבור טריוויה, סקר ותשובה בתמונה) */}
               {["trivia", "poll", "image_answer"].includes(activeSlide.slide_type) && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
@@ -808,7 +832,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                       {activeSlide.slide_type === "poll" ? "אפשרויות הצבעה" : "תשובות המשחק"}
                     </label>
                     
-                    {/* תיבת סימון תשובות מרובות */}
                     {activeSlide.slide_type === "trivia" && (
                       <label className="flex items-center gap-2 cursor-pointer text-xs text-white/80">
                         <input
@@ -822,7 +845,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     )}
                   </div>
 
-                  {/* רשימת התשובות (מבנה גריד 2x2) */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {activeSlide.options.map((option, index) => {
                       const bgColors = ["bg-red-500/10 border-red-500/30", "bg-blue-500/10 border-blue-500/30", "bg-amber-500/10 border-amber-500/30", "bg-emerald-500/10 border-emerald-500/30"];
@@ -831,7 +853,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                           key={option.id}
                           className={`p-3 rounded-2xl border flex items-center gap-3 relative ${bgColors[index % 4]}`}
                         >
-                          {/* סימון תשובה נכונה (עבור טריוויה ותשובה בתמונה) */}
                           {activeSlide.slide_type !== "poll" && (
                             <button
                               type="button"
@@ -853,7 +874,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                             </button>
                           )}
 
-                          {/* במידה וזה "תשובה בתמונה" */}
                           {activeSlide.slide_type === "image_answer" ? (
                             <div className="flex-1 flex items-center gap-2">
                               {option.imageUrl ? (
@@ -871,7 +891,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                               </button>
                             </div>
                           ) : (
-                            /* תשובה טקסטואלית רגילה */
                             <input
                               type="text"
                               value={option.text}
@@ -886,7 +905,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                             />
                           )}
 
-                          {/* מחיקת תשובה */}
                           {activeSlide.options.length > 2 && (
                             <button
                               onClick={() => {
@@ -903,7 +921,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     })}
                   </div>
 
-                  {/* כפתור הוספת תשובה */}
                   {activeSlide.options.length < 6 && (
                     <button
                       onClick={() => {
@@ -923,9 +940,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* הגדרות זמן, ניקוד ומדיה לשקופית */}
               <div className="pt-4 border-t border-white/10 grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* זמן מענה */}
                 <div>
                   <label className="block text-xs font-bold text-white/70 mb-1">זמן מענה (שניות)</label>
                   <select
@@ -941,7 +956,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   </select>
                 </div>
 
-                {/* ניקוד (רק לטריוויה ותשובה בתמונה) */}
                 {["trivia", "image_answer"].includes(activeSlide.slide_type) && (
                   <div>
                     <label className="block text-xs font-bold text-white/70 mb-1">ניקוד לשאלה זו</label>
@@ -959,7 +973,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                   </div>
                 )}
 
-                {/* מדיה לשאלה */}
                 <div>
                   <label className="block text-xs font-bold text-white/70 mb-1">תמונת שאלה / מדיה</label>
                   <button
@@ -977,11 +990,10 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </main>
       </div>
 
-      {/* ================= 4. מודאל פאנל ההגדרות (8 הלשוניות) ================= */}
+      {/* ================= MODALS & PANELS ================= */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-4xl h-[85vh] bg-[#12151c] border border-white/15 rounded-3xl flex overflow-hidden shadow-2xl relative">
-            
             <button
               onClick={() => setIsSettingsOpen(false)}
               className="absolute top-4 left-4 text-white/40 hover:text-white z-10"
@@ -989,7 +1001,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               <X className="w-5 h-5" />
             </button>
 
-            {/* לשוניות בצד */}
             <div className="w-64 bg-[#0d1017] border-l border-white/10 p-4 space-y-1 shrink-0 overflow-y-auto">
               <h3 className="text-sm font-bold text-white mb-4 px-3 flex items-center gap-2">
                 <Settings className="w-4 h-4 text-indigo-400" />
@@ -1025,10 +1036,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               })}
             </div>
 
-            {/* תוכן הלשונית הנבחרת */}
             <div className="flex-1 p-6 overflow-y-auto">
-              
-              {/* 1. כללי */}
               {settingsTab === "general" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">הגדרות כלליות</h4>
@@ -1054,7 +1062,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 2. עיצוב, צלילים ומדיה */}
               {settingsTab === "design" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">רקעים ומוזיקה גלובלית</h4>
@@ -1079,7 +1086,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 3. מהלך המשחק */}
               {settingsTab === "flow" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">אוטומציות וזרימת המשחק</h4>
@@ -1104,7 +1110,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 4. זוכים ומובילים */}
               {settingsTab === "winners" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">הגדרות מובילים ולוח תוצאות</h4>
@@ -1129,7 +1134,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 5. כלים מהירים */}
               {settingsTab === "tools" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">כלים מהירים ואוטומציות אצווה</h4>
@@ -1157,12 +1161,9 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 6. משתתפים ו-XL */}
               {settingsTab === "participants" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">ניהול משתתפים / הרשמה מראש</h4>
-                  
-                  {/* הוספת משתתף ידנית */}
                   <div className="flex gap-2 bg-[#181d29] p-3 rounded-xl border border-white/10">
                     <input
                       type="text"
@@ -1194,7 +1195,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                     </button>
                   </div>
 
-                  {/* טבלת משתתפים */}
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {participants.map((p) => (
                       <div key={p.id} className="flex items-center justify-between bg-[#181d29] p-2.5 rounded-xl border border-white/5 text-xs">
@@ -1214,11 +1214,9 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 7. יצירת קבוצות */}
               {settingsTab === "teams" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">יצירת קבוצות משחק</h4>
-                  
                   <div className="flex gap-2 bg-[#181d29] p-3 rounded-xl border border-white/10">
                     <input
                       type="text"
@@ -1270,7 +1268,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* 8. תוצאות והיסטוריה */}
               {settingsTab === "results" && (
                 <div className="space-y-4">
                   <h4 className="text-base font-bold text-white mb-4">תוצאות והיסטוריית הרצות</h4>
@@ -1278,7 +1275,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 </div>
               )}
 
-              {/* כפתור שמירה מרכזי בהגדרות */}
               <div className="pt-6 mt-6 border-t border-white/10 flex justify-end">
                 <button
                   onClick={() => {
@@ -1296,7 +1292,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
 
-      {/* ================= 5. מודאל מחולל AI (AI GENERATOR MODAL) ================= */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-[#12151c] border border-purple-500/30 rounded-3xl p-6 relative shadow-2xl">
@@ -1309,7 +1304,7 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
                 <Sparkles className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-white">מחולל שאלות ב-AI (מנגנון חינמי)</h3>
+                <h3 className="text-base font-bold text-white">מחולל שאלות ב-AI</h3>
                 <p className="text-xs text-white/50">צור שאלות אוטומטית בעזרת בינה מלאכותית</p>
               </div>
             </div>
@@ -1366,7 +1361,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
 
-      {/* ================= 6. מודאל משיכה ממאגר ציבורי ================= */}
       {isPublicBankOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-2xl bg-[#12151c] border border-white/15 rounded-3xl p-6 relative shadow-2xl max-h-[80vh] flex flex-col">
@@ -1405,7 +1399,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
 
-      {/* ================= 7. מודאל 4 מקורות מדיה (MEDIA PICKER) ================= */}
       {mediaPickerTarget && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-[#12151c] border border-white/15 rounded-3xl p-6 relative shadow-2xl">
@@ -1415,7 +1408,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
 
             <h3 className="text-base font-bold text-white mb-4">בחירת מקור מדיה</h3>
 
-            {/* 4 בלשוניות מקורות מדיה */}
             <div className="grid grid-cols-4 gap-2 bg-[#181d29] p-1.5 rounded-xl mb-6">
               {[
                 { id: "upload", label: "העלאה", icon: Upload },
@@ -1440,7 +1432,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               })}
             </div>
 
-            {/* 1. העלאת קובץ אישי */}
             {mediaPickerTab === "upload" && (
               <div className="border-2 border-dashed border-white/10 rounded-2xl p-8 text-center bg-[#181d29]">
                 <Upload className="w-8 h-8 text-indigo-400 mx-auto mb-2" />
@@ -1469,7 +1460,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               </div>
             )}
 
-            {/* 2. מאגר מובנה */}
             {mediaPickerTab === "stock" && (
               <div className="grid grid-cols-3 gap-3">
                 {[
@@ -1488,7 +1478,6 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               </div>
             )}
 
-            {/* 3. קישור YouTube */}
             {mediaPickerTab === "youtube" && (
               <div className="space-y-3">
                 <input
@@ -1507,14 +1496,13 @@ export default function EditorPage({ params }: { params: Promise<{ id: string }>
               </div>
             )}
 
-            {/* 4. יצירת תמונה ב-AI בחינם */}
             {mediaPickerTab === "ai" && (
               <div className="space-y-3">
                 <input
                   type="text"
                   value={aiImagePrompt}
                   onChange={(e) => setAiImagePrompt(e.target.value)}
-                  placeholder="תאר את התמונה שברצונך ליצור (למשל: חללית זהובה טסה בערפילית סגולה)"
+                  placeholder="תאר את התמונה שברצונך ליצור..."
                   className="w-full bg-[#181d29] border border-white/10 rounded-xl p-3 text-xs text-white"
                 />
                 <button
