@@ -19,12 +19,12 @@ import {
   Calendar,
   HelpCircle,
   Filter,
-  CheckCircle2,
   KeyRound,
   Mail,
   Loader2,
 } from "lucide-react";
 
+// טיפוס הנתונים התואם למבנה ה-DB האמיתי
 interface Quiz {
   id: string;
   title: string;
@@ -42,6 +42,9 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // DB Quizzes State
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [filterBy, setFilterBy] = useState<"all" | "recent" | "questions">("all");
@@ -52,41 +55,13 @@ export default function DashboardPage() {
 
   // Profile Form state
   const [fullName, setFullName] = useState("");
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [profileMsg, setProfileMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
-  // Mock Quizzes Data (יוחלף בהמשך בקריאות ל-Supabase DB)
-  const [quizzes, setQuizzes] = useState<Quiz[]>([
-    {
-      id: "1",
-      title: "חידון טריוויה כללי - חנוכה 2026",
-      coverImage: "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=600&q=80",
-      questionCount: 15,
-      updatedAt: "2026-07-20",
-      tags: ["חגים", "טריוויה", "בתי ספר"],
-    },
-    {
-      id: "2",
-      title: "אתגר מדע וחלל למתקדמים",
-      coverImage: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=600&q=80",
-      questionCount: 22,
-      updatedAt: "2026-07-15",
-      tags: ["מדע", "חלל"],
-    },
-    {
-      id: "3",
-      title: "משחק גיבוש לצוות - קיץ 2026",
-      questionCount: 10,
-      updatedAt: "2026-07-02",
-      tags: ["גיבוש", "חברה"],
-    },
-  ]);
-
-  // טעינת פרטי משתמש
+  // 1. טעינת פרטי משתמש + שליפת חידונים אמיתיים מ-Supabase
   useEffect(() => {
-    const fetchUser = async () => {
+    const fetchDashboardData = async () => {
       const { data: { user: currentUser }, error } = await supabase.auth.getUser();
       if (error || !currentUser) {
         router.push("/login");
@@ -94,9 +69,35 @@ export default function DashboardPage() {
       }
       setUser(currentUser);
       setFullName(currentUser.user_metadata?.full_name || currentUser.email?.split("@")[0] || "");
+
+      // שליפת החידונים והשקופיות מה-DB
+      const { data: gamesData, error: gamesError } = await supabase
+        .from("games")
+        .select(`
+          id,
+          title,
+          cover_image,
+          updated_at,
+          settings,
+          slides(id)
+        `)
+        .order("updated_at", { ascending: false });
+
+      if (!gamesError && gamesData) {
+        const formattedQuizzes: Quiz[] = gamesData.map((game: any) => ({
+          id: game.id,
+          title: game.title,
+          coverImage: game.cover_image || undefined,
+          questionCount: game.slides ? game.slides.length : 0,
+          updatedAt: new Date(game.updated_at).toISOString().split("T")[0],
+          tags: game.settings?.tags || ["כללי"],
+        }));
+        setQuizzes(formattedQuizzes);
+      }
       setLoading(false);
     };
-    fetchUser();
+
+    fetchDashboardData();
   }, [router, supabase]);
 
   // התנתקות מלאה
@@ -106,32 +107,81 @@ export default function DashboardPage() {
     router.refresh();
   };
 
-  // יצירת חידון חדש
-  const handleCreateQuiz = () => {
-    const newId = Date.now().toString();
-    router.push(`/editor/${newId}`);
+  // 2. יצירת חידון חדש אמיתי ב-DB
+  const handleCreateQuiz = async () => {
+    if (!user) return;
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("games")
+      .insert([
+        {
+          user_id: user.id,
+          title: "חידון חדש ללא שם",
+          settings: { tags: ["טריוויה"] },
+        },
+      ])
+      .select()
+      .single();
+
+    if (!error && data) {
+      router.push(`/editor/${data.id}`);
+    } else {
+      console.error("שגיאה ביצירת המשחק:", error);
+      setLoading(false);
+    }
   };
 
-  // שכפול חידון
-  const handleDuplicate = (quiz: Quiz) => {
-    const duplicated: Quiz = {
-      ...quiz,
-      id: Date.now().toString(),
-      title: `${quiz.title} (עותק)`,
-      updatedAt: new Date().toISOString().split("T")[0],
-    };
-    setQuizzes([duplicated, ...quizzes]);
+  // 3. שכפול חידון אמיתי ב-DB
+  const handleDuplicate = async (quiz: Quiz) => {
+    if (!user) return;
+
+    const { data: originalGame } = await supabase
+      .from("games")
+      .select("settings, cover_image")
+      .eq("id", quiz.id)
+      .single();
+
+    const { data: newGame, error } = await supabase
+      .from("games")
+      .insert([
+        {
+          user_id: user.id,
+          title: `${quiz.title} (עותק)`,
+          cover_image: originalGame?.cover_image || null,
+          settings: originalGame?.settings || { tags: quiz.tags },
+        },
+      ])
+      .select()
+      .single();
+
+    if (!error && newGame) {
+      const duplicated: Quiz = {
+        id: newGame.id,
+        title: newGame.title,
+        coverImage: newGame.cover_image || undefined,
+        questionCount: 0,
+        updatedAt: new Date(newGame.updated_at).toISOString().split("T")[0],
+        tags: quiz.tags,
+      };
+      setQuizzes([duplicated, ...quizzes]);
+    }
   };
 
-  // מחיקת חידון
-  const confirmDelete = () => {
+  // 4. מחיקת חידון אמיתית ב-DB
+  const confirmDelete = async () => {
     if (deleteTargetId) {
-      setQuizzes(quizzes.filter((q) => q.id !== deleteTargetId));
+      const { error } = await supabase.from("games").delete().eq("id", deleteTargetId);
+      if (!error) {
+        setQuizzes(quizzes.filter((q) => q.id !== deleteTargetId));
+      } else {
+        console.error("שגיאה במחיקת החידון:", error);
+      }
       setDeleteTargetId(null);
     }
   };
 
-  // עדכון פרופיל
+  // 5. עדכון פרופיל אמיתי
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingProfile(true);
@@ -143,6 +193,9 @@ export default function DashboardPage() {
           data: { full_name: fullName },
         });
         if (error) throw error;
+
+        // עדכון טבלת profiles במידה וקיימת
+        await supabase.from("profiles").upsert({ id: user.id, full_name: fullName, email: user.email });
       }
 
       if (newPassword) {
@@ -152,7 +205,6 @@ export default function DashboardPage() {
 
       setProfileMsg({ type: "success", text: "הפרטים עודכנו בהצלחה!" });
       setNewPassword("");
-      setCurrentPassword("");
     } catch (err: any) {
       setProfileMsg({ type: "error", text: err.message || "אירעה שגיאה בעדכון" });
     } finally {
@@ -274,7 +326,7 @@ export default function DashboardPage() {
               </select>
             </div>
 
-            {/* 2. כפתור יצירת חידון חדש */}
+            {/* כפתור יצירת חידון חדש */}
             <button
               onClick={handleCreateQuiz}
               className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm shadow-lg shadow-indigo-500/25 flex items-center gap-2 active:scale-95 transition-all"
@@ -299,7 +351,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 3. תצוגת החידונים (Quiz Cards Grid) */}
+        {/* תצוגת החידונים (Quiz Cards Grid) */}
         {filteredQuizzes.length === 0 ? (
           <div className="bg-[#12151C]/60 border border-white/10 rounded-3xl p-12 text-center max-w-lg mx-auto my-12">
             <HelpCircle className="w-12 h-12 text-indigo-400 mx-auto mb-4 opacity-80" />
@@ -361,7 +413,7 @@ export default function DashboardPage() {
                     </span>
                   </div>
 
-                  {/* 4 כפתורי פעולה מהירים */}
+                  {/* 4 כפתורי פעולה מהירים מוגדרים ומחוברים לפי האפיון */}
                   <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/10">
                     <button
                       onClick={() => router.push(`/editor/${quiz.id}`)}
@@ -403,7 +455,7 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* 4. מודאל פרופיל משתמש (User Profile Settings) */}
+      {/* מודאל פרופיל משתמש (User Profile Settings) */}
       {isProfileOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#12151C] border border-white/15 rounded-3xl p-6 relative shadow-2xl">
@@ -457,18 +509,20 @@ export default function DashboardPage() {
               <div className="pt-2 border-t border-white/10">
                 <h4 className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
-                  {isGoogleUser ? "יצירת סיסמה לחשבון" : "שינוי סיסמה"}
+                  {isGoogleUser ? "חשבון גוגל (שינוי סיסמה מנוטרל)" : "שינוי סיסמה"}
                 </h4>
 
-                <div className="space-y-3">
-                  <input
-                    type="password"
-                    placeholder="סיסמה חדשה"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full bg-[#181B24] border border-white/10 rounded-xl py-2.5 px-3.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                {!isGoogleUser && (
+                  <div className="space-y-3">
+                    <input
+                      type="password"
+                      placeholder="סיסמה חדשה"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-[#181B24] border border-white/10 rounded-xl py-2.5 px-3.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 flex gap-3">
