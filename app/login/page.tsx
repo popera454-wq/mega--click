@@ -17,13 +17,15 @@ export default function AuthPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
-  // מעבר מצב כולל ניקוי הודעות ושדות
-  const switchMode = (newMode: "login" | "signup" | "forgot") => {
-    setMode(newMode);
-    setMessage(null);
-  };
+  // בדיקה אם חזרנו מאותנטיקציה עם שגיאה ב-URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") === "auth-failed") {
+      setMessage({ type: "error", text: "אימות החשבון נכשל. אנא נסה שוב." });
+    }
+  }, []);
 
-  // בדיקה בטעינה אם המשתמש כבר מחובר
+  // בדיקת סשן קיימת
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -36,11 +38,17 @@ export default function AuthPage() {
     checkUser();
   }, [router, supabase]);
 
-  // התחברות / הרשמה / איפוס סיסמה
+  const switchMode = (newMode: "login" | "signup" | "forgot") => {
+    setMode(newMode);
+    setMessage(null);
+  };
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
+
+    const redirectUrl = `${window.location.origin}/auth/callback`;
 
     try {
       if (mode === "login") {
@@ -52,7 +60,7 @@ export default function AuthPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          options: { emailRedirectTo: redirectUrl },
         });
         if (error) throw error;
         setMessage({ type: "success", text: "נשלח אליך מייל לאישור ההרשמה!" });
@@ -70,16 +78,19 @@ export default function AuthPage() {
     }
   };
 
-  // התחברות באמצעות Google
   const handleGoogleLogin = async () => {
     setLoading(true);
     setMessage(null);
+
+    const redirectUrl = `${window.location.origin}/auth/callback`;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: redirectUrl,
       },
     });
+
     if (error) {
       setMessage({ type: "error", text: error.message });
       setLoading(false);
@@ -117,7 +128,7 @@ export default function AuthPage() {
           </p>
         </div>
 
-        {/* Message Banner */}
+        {/* Banner Message */}
         {message && (
           <div className={`p-3.5 rounded-xl text-xs mb-6 border ${message.type === "error" ? "bg-red-500/10 border-red-500/30 text-red-300" : "bg-green-500/10 border-green-500/30 text-green-300"}`}>
             {message.text}
@@ -127,7 +138,7 @@ export default function AuthPage() {
         {/* Form */}
         <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-[#C5C7D0] mb-1">אימייל</label>
+            <label className="block text-xs font-medium text-[#C5C7D0] mb-1">דוא&quot;ל</label>
             <div className="relative">
               <Mail className="w-4 h-4 absolute right-3.5 top-3.5 text-[#C5C7D0]/50" />
               <input
@@ -181,7 +192,7 @@ export default function AuthPage() {
           </button>
         </form>
 
-        {/* Divider & Google Auth */}
+        {/* Separator & Google OAuth */}
         {mode !== "forgot" && (
           <>
             <div className="relative my-6 text-center">
@@ -189,7 +200,6 @@ export default function AuthPage() {
               <span className="relative bg-[#12151C] px-3 text-[11px] text-[#C5C7D0]/60 font-medium">או</span>
             </div>
 
-            {/* Google Button - Fixed type="button" */}
             <button
               type="button"
               onClick={handleGoogleLogin}
@@ -207,7 +217,7 @@ export default function AuthPage() {
           </>
         )}
 
-        {/* Toggle Mode Footer */}
+        {/* Footer Navigation */}
         <div className="mt-8 text-center text-xs text-[#C5C7D0]">
           {mode === "login" && (
             <p>
